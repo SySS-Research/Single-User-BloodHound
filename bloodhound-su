@@ -1,0 +1,94 @@
+#!/bin/bash
+
+set -uo pipefail
+
+PORT="${PORT:-8181}"
+WORKSPACE="${WORKSPACE:-default}"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/SingleUserBloodHound/$WORKSPACE"
+NEO4J_VOL="$DATA_DIR/neo4j"
+POSTGRES_VOL="$DATA_DIR/postgres"
+NETWORK="SingleUserBloodHound-network"
+
+BLOODHOUND_CONTAINER="SingleUserBloodHound_BH"
+NEO4J_CONTAINER="SingleUserBloodHound_Neo4j"
+POSTGRES_CONTAINER="SingleUserBloodHound_PSQL"
+
+finish() {
+  result=$?
+  echo Stopping containers ...
+  podman stop -i "${BLOODHOUND_CONTAINER}"  > /dev/null
+  podman stop -i "${NEO4J_CONTAINER}"  > /dev/null
+  podman stop -i "${POSTGRES_CONTAINER}" > /dev/null
+  exit ${result}
+}
+trap finish EXIT
+
+mkdir -p "$DATA_DIR"
+mkdir -p "$NEO4J_VOL"
+mkdir -p "$POSTGRES_VOL"
+
+podman network exists "$NETWORK" || podman network create "$NETWORK"
+
+TIMESTAMP="$(date +%s)"
+
+podman container exists "$POSTGRES_CONTAINER" || ( \
+    echo Building postgres container ... && \
+    podman create \
+    --net "$NETWORK" --network-alias app-db \
+    --name "$POSTGRES_CONTAINER" \
+    --volume $POSTGRES_VOL:/var/lib/postgresql/data \
+    -e POSTGRES_PASSWORD=bloodhoundcommunityedition \
+    -e POSTGRES_USER=bloodhound \
+    -e POSTGRES_DATABASE=bloodhound \
+    docker.io/postgres:13.2 \
+    > /dev/null
+    )
+
+podman container exists "$NEO4J_CONTAINER" || ( \
+    echo Building neo4j container ... && \
+    podman create \
+    --net "$NETWORK" --network-alias graph-db \
+    --name "$NEO4J_CONTAINER" \
+    --volume $NEO4J_VOL:/data \
+    -e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
+    docker.io/neo4j:4.4 \
+    > /dev/null
+    )
+
+podman container exists "$BLOODHOUND_CONTAINER" || ( \
+    echo Building bloodhound container ... && \
+    podman create \
+    --net "$NETWORK" --network-alias bloodhound \
+    --name "$BLOODHOUND_CONTAINER" \
+    --publish 127.0.0.1:${PORT}:8080 \
+    "docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}" \
+    > /dev/null
+    )
+
+podman start "$POSTGRES_CONTAINER" > /dev/null
+podman start "$NEO4J_CONTAINER" > /dev/null
+
+# Not waiting for postgres because it's faster than neo4j anyway. Also this
+# grep trick doesn't work there for whatever reason. Probably buffer issues.
+
+echo Wait until neo4j is ready ...
+until podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1| grep -q "Remote interface available at http://localhost:7474/" ; do sleep 1 ; done
+
+podman start "$BLOODHOUND_CONTAINER" > /dev/null
+
+echo Wait until bloodhound is ready ...
+until podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep -q "Server started successfully" ; do sleep 1 ; done
+
+INITIAL_PW="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep "Initial Password Set To:" | sed 's/.*Password Set To:\s*\(.*\)\s.*/\1/')"
+
+if [[ -n $INITIAL_PW ]] ; then
+    echo "Setting initial password ..."
+    DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
+    podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
+    echo "Login with admin/admin"
+fi
+
+echo "Success! Go to http://localhost:$PORT"
+echo "Press CTRL-C when you're done."
+
+podman attach "$BLOODHOUND_CONTAINER"
