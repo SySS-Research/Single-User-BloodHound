@@ -15,7 +15,8 @@ Simply run `./bloodhound-su`. Link or copy it to `~/.local/bin` or
 `/usr/bin` if you want.
 
 It supports workspaces to keep different databases in parallel. They're
-located in `$XDG_DATA_HOME/bloodhound-su` (`~/.local/share/bloodhound-su` by
+located in `$XDG_DATA_HOME/SingleUserBloodHound`
+(or `~/.local/share/SingleUserBloodHound` by
 default). To set the name of the workspace, use environment variables:
 
 ```console
