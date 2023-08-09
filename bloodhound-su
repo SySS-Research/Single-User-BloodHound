@@ -105,10 +105,10 @@ if [[ -n $INITIAL_PW ]] ; then
     echo "Setting initial password ..."
     DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
     podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
-    echo "Login with admin/admin"
 fi
 
 echo "Success! Go to http://localhost:$PORT"
+echo "Login with admin/admin"
 echo "Press CTRL-C when you're done."
 
 podman attach "$BLOODHOUND_CONTAINER"
