@@ -4,7 +4,7 @@
 This runs [BloodHound CE](https://github.com/SpecterOps/BloodHound) as if it
 were a single, self-contained app in a single-user scenario.
 
-It's based on SpectreOp's
+It's based on SpecterOp's
 [Dockerfile](https://github.com/SpecterOps/BloodHound/blob/294dab1f72fb3fcbaf7d010fd7ee9301f6ba78fe/dockerfiles/bloodhound.Dockerfile),
 but uses podman, sets the default credentials to **admin/admin** (no password
 change needed) and exposes port 8181 on localhost only.
