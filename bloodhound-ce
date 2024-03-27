@@ -56,7 +56,7 @@ fi
 finish() {
     result=$?
     echo Stopping containers ...
-    podman stop -i "${BLOODHOUND_CONTAINER}" > /dev/null
+    #  podman stop -i "${BLOODHOUND_CONTAINER}" > /dev/null
     podman stop -i "${NEO4J_CONTAINER}" > /dev/null
     podman stop -i "${POSTGRES_CONTAINER}" > /dev/null
     exit ${result}
@@ -143,9 +143,9 @@ echo "Setting initial password ..."
 DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
 podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
 
-echo "${GREEN}Success! Go to http://localhost:$PORT${NC}"
-echo "${GREEN}Login with admin/admin${NC}"
-echo "Workspace: ${WORKSPACE}"
-echo "Press CTRL-C when you're done."
+printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
+printf "${GREEN}Login with admin/admin${NC}\n"
+printf "Workspace: ${WORKSPACE}\n"
+printf "Press CTRL-C when you're done.\n"
 
 podman attach "$BLOODHOUND_CONTAINER"
