@@ -11,8 +11,24 @@ change needed) and exposes port 8181 on localhost only.
 
 No dependencies except for podman (and `bash`, `grep` and `date`)!
 
-Simply run `./bloodhound-ce`. Link or copy it to `~/.local/bin` or
-`/usr/bin` if you want.
+Simply run `./bloodhound-ce`:
+
+
+```console
+$ ./bloodhound-ce
+Running postgres container ...
+Running neo4j container ...
+Wait until neo4j is ready ...
+Running bloodhound container ...
+Wait until bloodhound is ready ...
+Setting initial password ...
+Success! Go to http://localhost:8181
+Login with admin/admin
+Press CTRL-C when you're done.
+...
+```
+
+Link or copy the executable to `~/.local/bin` or `/usr/bin` if you want.
 
 It supports workspaces to keep different databases in parallel. They're
 located in `$XDG_DATA_HOME/BloodHound-CE`
