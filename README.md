@@ -32,6 +32,11 @@ $ DATA_DIR=BH_DATA bloodhound-ce
 Then the data will be stored in `BH_DATA` in the current working directory.
 The port to listen on can similarly be changed by setting `$PORT`.
 
+To update the images:
+
+```console
+$ bloodhound-ce pull
+
 In case you want to start over completely, delete the containers and volumes:
 ```console
 $ podman container rm --filter name='BloodHound-CE*'

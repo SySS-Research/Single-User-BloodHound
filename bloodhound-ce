@@ -25,90 +25,127 @@ set -uo pipefail
 
 PORT="${PORT:-8181}"
 WORKSPACE="${WORKSPACE:-default}"
-DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/SingleUserBloodHound/$WORKSPACE"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/BloodHound-CE/$WORKSPACE"
 NEO4J_VOL="$DATA_DIR/neo4j"
 POSTGRES_VOL="$DATA_DIR/postgres"
-NETWORK="SingleUserBloodHound-network"
+NETWORK="BloodHound-CE-network"
 
-BLOODHOUND_CONTAINER="SingleUserBloodHound_BH"
-NEO4J_CONTAINER="SingleUserBloodHound_Neo4j"
-POSTGRES_CONTAINER="SingleUserBloodHound_PSQL"
+BLOODHOUND_IMAGE="docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}"
+NEO4J_IMAGE="docker.io/library/neo4j:4.4"
+POSTGRES_IMAGE="docker.io/library/postgres:13.2"
 
-finish() {
-  result=$?
-  echo Stopping containers ...
-  podman stop -i "${BLOODHOUND_CONTAINER}"  > /dev/null
-  podman stop -i "${NEO4J_CONTAINER}"  > /dev/null
-  podman stop -i "${POSTGRES_CONTAINER}" > /dev/null
-  exit ${result}
-}
-trap finish EXIT
+BLOODHOUND_CONTAINER="BloodHound-CE_BH"
+NEO4J_CONTAINER="BloodHound-CE_Neo4j"
+POSTGRES_CONTAINER="BloodHound-CE_PSQL"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
 
 mkdir -p "$DATA_DIR"
 mkdir -p "$NEO4J_VOL"
 mkdir -p "$POSTGRES_VOL"
 
+if [ "${1:-}" = 'pull' ] ; then
+    podman pull "$BLOODHOUND_IMAGE"
+    podman pull "$NEO4J_IMAGE"
+    podman pull "$POSTGRES_IMAGE"
+    exit
+fi
+
+finish() {
+    result=$?
+    echo Stopping containers ...
+    podman stop -i "${BLOODHOUND_CONTAINER}" > /dev/null
+    podman stop -i "${NEO4J_CONTAINER}" > /dev/null
+    podman stop -i "${POSTGRES_CONTAINER}" > /dev/null
+    exit ${result}
+}
+trap finish EXIT
+
+
 podman network exists "$NETWORK" || podman network create "$NETWORK"
 
 TIMESTAMP="$(date +%s)"
 
-podman container exists "$POSTGRES_CONTAINER" || ( \
-    echo Creating postgres container ... && \
-    podman create \
+function run_postgres () {
+    echo Running postgres container ... && \
+    podman run \
+    --rm \
+    --detach \
+    --replace \
     --net "$NETWORK" --network-alias app-db \
     --name "$POSTGRES_CONTAINER" \
     --volume $POSTGRES_VOL:/var/lib/postgresql/data \
     -e POSTGRES_PASSWORD=bloodhoundcommunityedition \
     -e POSTGRES_USER=bloodhound \
     -e POSTGRES_DATABASE=bloodhound \
-    docker.io/postgres:13.2 \
+    "$POSTGRES_IMAGE" \
     > /dev/null
-    )
+}
 
-podman container exists "$NEO4J_CONTAINER" || ( \
-    echo Creating neo4j container ... && \
-    podman create \
+function run_neo4j () {
+    echo Running neo4j container ... && \
+    podman run \
+    --rm \
+    --detach \
+    --replace \
     --net "$NETWORK" --network-alias graph-db \
     --name "$NEO4J_CONTAINER" \
     --volume $NEO4J_VOL:/data \
     -e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
-    docker.io/neo4j:4.4 \
+    "$NEO4J_IMAGE" \
     > /dev/null
-    )
+}
 
-podman container exists "$BLOODHOUND_CONTAINER" || ( \
-    echo Creating bloodhound container ... && \
-    podman create \
+function run_bloodhound () {
+    echo Running bloodhound container ... && \
+    podman run \
+    --rm \
+    --replace \
+    --detach \
     --net "$NETWORK" --network-alias bloodhound \
     --name "$BLOODHOUND_CONTAINER" \
     --publish 127.0.0.1:${PORT}:8080 \
-    "docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}" \
+    -e bhe_disable_cypher_qc="${bhe_disable_cypher_qc:-false}" \
+    -e bhe_database_connection="user=bloodhound password=bloodhoundcommunityedition dbname=bloodhound host=app-db" \
+    -e bhe_neo4j_connection="neo4j://neo4j:bloodhoundcommunityedition@graph-db:7687/" \
+    "$BLOODHOUND_IMAGE" \
     > /dev/null
-    )
+}
 
-podman start "$POSTGRES_CONTAINER" > /dev/null
-podman start "$NEO4J_CONTAINER" > /dev/null
+run_postgres
+run_neo4j
 
 # Not waiting for postgres because it's faster than neo4j anyway.
 
 echo Wait until neo4j is ready ...
-until podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1| grep -q "Remote interface available at http://localhost:7474/" ; do sleep 1 ; done
+until podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1| grep -q "Remote interface available at http://localhost:7474/"
+do
+    sleep 1
+done
 
-podman start "$BLOODHOUND_CONTAINER" > /dev/null
+run_bloodhound
 
 echo Wait until bloodhound is ready ...
-until podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep -q "Server started successfully" ; do sleep 1 ; done
+until podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep -q "Server started successfully"
+do
+    sleep 1
+    if ! podman container exists "$BLOODHOUND_CONTAINER" ; then
+        echo "BloodHound container failed"
+        exit 1
+    fi
+done
 
 INITIAL_PW="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep "Initial Password Set To:" | sed 's/.*Password Set To:\s*\(.*\)\s.*/\1/')"
 
-if [[ -n $INITIAL_PW ]] ; then
-    echo "Setting initial password ..."
-    DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
-    podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
-fi
+echo "Setting initial password ..."
+DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
+podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
 
-echo "Success! Go to http://localhost:$PORT"
-echo "Login with admin/admin"
+echo "${GREEN}Success! Go to http://localhost:$PORT${NC}"
+echo "${GREEN}Login with admin/admin${NC}"
+echo "Workspace: ${WORKSPACE}"
 echo "Press CTRL-C when you're done."
 
 podman attach "$BLOODHOUND_CONTAINER"
