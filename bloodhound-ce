@@ -145,7 +145,7 @@ podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE a
 
 printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
 printf "${GREEN}Login with admin/admin${NC}\n"
-printf "Workspace: ${WORKSPACE}\n"
-printf "Press CTRL-C when you're done.\n"
+echo "Workspace: ${WORKSPACE}"
+echo "Press CTRL-C when you're done."
 
 podman attach "$BLOODHOUND_CONTAINER"
