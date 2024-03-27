@@ -11,22 +11,22 @@ change needed) and exposes port 8181 on localhost only.
 
 No dependencies except for podman (and `bash`, `grep` and `date`)!
 
-Simply run `./bloodhound-su`. Link or copy it to `~/.local/bin` or
+Simply run `./bloodhound-ce`. Link or copy it to `~/.local/bin` or
 `/usr/bin` if you want.
 
 It supports workspaces to keep different databases in parallel. They're
-located in `$XDG_DATA_HOME/SingleUserBloodHound`
-(or `~/.local/share/SingleUserBloodHound` by
+located in `$XDG_DATA_HOME/BloodHound-CE`
+(or `~/.local/share/BloodHound-CE` by
 default). To set the name of the workspace, use environment variables:
 
 ```console
-$ WORKSPACE=client1 bloodhound-su
+$ WORKSPACE=client1 bloodhound-ce
 ```
 
 The location of the workspace's data directory can be set directly like so:
 
 ```console
-$ DATA_DIR=BH_DATA bloodhound-su
+$ DATA_DIR=BH_DATA bloodhound-ce
 ```
 
 Then the data will be stored in `BH_DATA` in the current working directory.
@@ -34,6 +34,6 @@ The port to listen on can similarly be changed by setting `$PORT`.
 
 In case you want to start over completely, delete the containers and volumes:
 ```console
-$ podman container rm --filter name='SingleUserBloodHound*'
-$ rm -rf ~/.local/share/SingleUserBloodHound/
+$ podman container rm --filter name='BloodHound-CE*'
+$ rm -rf ~/.local/share/BloodHound-CE/
 ```
