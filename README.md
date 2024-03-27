@@ -36,6 +36,7 @@ To update the images:
 
 ```console
 $ bloodhound-ce pull
+```
 
 In case you want to start over completely, delete the containers and volumes:
 ```console
