@@ -132,14 +132,14 @@ until podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep -q "Se
 do
     sleep 1
     if ! podman container exists "$BLOODHOUND_CONTAINER" ; then
-        echo "BloodHound container failed"
+        printf "${RED}BloodHound container failed${NC}\n"
+        podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER"
         exit 1
     fi
 done
 
-INITIAL_PW="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep "Initial Password Set To:" | sed 's/.*Password Set To:\s*\(.*\)\s.*/\1/')"
-
 echo "Setting initial password ..."
+# Set creds: admin/admin
 DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
 podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
 
@@ -148,4 +148,5 @@ printf "${GREEN}Login with admin/admin${NC}\n"
 echo "Workspace: ${WORKSPACE}"
 echo "Press CTRL-C when you're done."
 
-podman attach "$BLOODHOUND_CONTAINER"
+podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER"
+podman attach "$BLOODHOUND_CONTAINER" | grep --color -E 'error|$'
