@@ -1,18 +1,18 @@
 #!/bin/bash
 # MIT License
-# 
+#
 # Copyright (c) 2023 SySS Research, Adrian Vollmer
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -46,72 +46,74 @@ mkdir -p "$DATA_DIR"
 mkdir -p "$NEO4J_VOL"
 mkdir -p "$POSTGRES_VOL"
 
-if [ "${1:-}" = 'pull' ] ; then
-    podman pull "$BLOODHOUND_IMAGE"
-    podman pull "$NEO4J_IMAGE"
-    podman pull "$POSTGRES_IMAGE"
-    exit
+if [ "${1:-}" = 'pull' ]; then
+	podman pull "$BLOODHOUND_IMAGE"
+	podman pull "$NEO4J_IMAGE"
+	podman pull "$POSTGRES_IMAGE"
+	exit
 fi
 
 finish() {
-    result=$?
-    echo Stopping containers ...
-    #  podman stop -i "${BLOODHOUND_CONTAINER}" > /dev/null
-    podman stop -i "${NEO4J_CONTAINER}" > /dev/null
-    podman stop -i "${POSTGRES_CONTAINER}" > /dev/null
-    exit ${result}
+	result=$?
+	echo Stopping containers ...
+	#  podman stop -i "${BLOODHOUND_CONTAINER}" > /dev/null
+	podman stop -i "${NEO4J_CONTAINER}" >/dev/null
+	podman stop -i "${POSTGRES_CONTAINER}" >/dev/null
+	exit ${result}
 }
 trap finish EXIT
-
 
 podman network exists "$NETWORK" || podman network create "$NETWORK"
 
 TIMESTAMP="$(date +%s)"
 
-function run_postgres () {
-    echo Running postgres container ... && \
-    podman run \
-    --rm \
-    --detach \
-    --replace \
-    --net "$NETWORK" --network-alias app-db \
-    --name "$POSTGRES_CONTAINER" \
-    --volume $POSTGRES_VOL:/var/lib/postgresql/data \
-    -e POSTGRES_PASSWORD=bloodhoundcommunityedition \
-    -e POSTGRES_USER=bloodhound \
-    -e POSTGRES_DATABASE=bloodhound \
-    "$POSTGRES_IMAGE" \
-    > /dev/null
+function run_postgres() {
+	echo Running postgres container ... &&
+		podman run \
+			--rm \
+			--replace \
+			--detach \
+			--net "$NETWORK" \
+			--network-alias app-db \
+			--name "$POSTGRES_CONTAINER" \
+			--volume $POSTGRES_VOL:/var/lib/postgresql/data \
+			-e PGUSER=bloodhound \
+			-e POSTGRES_USER=bloodhound \
+			-e POSTGRES_PASSWORD=bloodhoundcommunityedition \
+			-e POSTGRES_DB=bloodhound \
+			"$POSTGRES_IMAGE" \
+			>/dev/null
 }
 
-function run_neo4j () {
-    echo Running neo4j container ... && \
-    podman run \
-    --rm \
-    --detach \
-    --replace \
-    --net "$NETWORK" --network-alias graph-db \
-    --name "$NEO4J_CONTAINER" \
-    --volume $NEO4J_VOL:/data \
-    -e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
-    "$NEO4J_IMAGE" \
-    > /dev/null
+function run_neo4j() {
+	echo Running neo4j container ... &&
+		podman run \
+			--rm \
+			--detach \
+			--replace \
+			--net "$NETWORK" \
+			--network-alias graph-db \
+			--name "$NEO4J_CONTAINER" \
+			--volume $NEO4J_VOL:/data \
+			-e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
+			"$NEO4J_IMAGE" \
+			>/dev/null
 }
 
-function run_bloodhound () {
-    echo Running bloodhound container ... && \
-    podman run \
-    --rm \
-    --replace \
-    --detach \
-    --net "$NETWORK" --network-alias bloodhound \
-    --name "$BLOODHOUND_CONTAINER" \
-    --publish 127.0.0.1:${PORT}:8080 \
-    -e bhe_disable_cypher_qc="${bhe_disable_cypher_qc:-false}" \
-    -e bhe_database_connection="user=bloodhound password=bloodhoundcommunityedition dbname=bloodhound host=app-db" \
-    -e bhe_neo4j_connection="neo4j://neo4j:bloodhoundcommunityedition@graph-db:7687/" \
-    "$BLOODHOUND_IMAGE" \
-    > /dev/null
+function run_bloodhound() {
+	echo Running bloodhound container ... &&
+		podman run \
+			--rm \
+			--replace \
+			--net "$NETWORK" \
+			--network-alias bloodhound \
+			--name "$BLOODHOUND_CONTAINER" \
+			--publish 127.0.0.1:${PORT}:8080 \
+			-e bhe_disable_cypher_qc="${bhe_disable_cypher_qc:-false}" \
+			-e bhe_database_connection="user=bloodhound password=bloodhoundcommunityedition dbname=bloodhound host=app-db" \
+			-e bhe_neo4j_connection="neo4j://neo4j:bloodhoundcommunityedition@graph-db:7687/" \
+			"$BLOODHOUND_IMAGE" \
+			>/dev/null
 }
 
 run_postgres
@@ -141,7 +143,7 @@ done
 echo "Setting initial password ..."
 # Set creds: admin/admin
 DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
-podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" > /dev/null
+podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" >/dev/null
 
 printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
 printf "${GREEN}Login with admin/admin${NC}\n"
