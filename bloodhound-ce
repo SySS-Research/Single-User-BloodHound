@@ -32,7 +32,7 @@ NETWORK="BloodHound-CE-network"
 
 BLOODHOUND_IMAGE="docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}"
 NEO4J_IMAGE="docker.io/library/neo4j:4.4"
-POSTGRES_IMAGE="docker.io/library/postgres:13.2"
+POSTGRES_IMAGE="docker.io/library/postgres:16"
 
 BLOODHOUND_CONTAINER="BloodHound-CE_BH"
 NEO4J_CONTAINER="BloodHound-CE_Neo4j"
