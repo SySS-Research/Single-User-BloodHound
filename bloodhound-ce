@@ -122,22 +122,29 @@ run_neo4j
 # Not waiting for postgres because it's faster than neo4j anyway.
 
 echo Wait until neo4j is ready ...
-until podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1| grep -q "Remote interface available at http://localhost:7474/"
-do
-    sleep 1
+while true; do
+	sleep 1
+	LOG="$(podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1)"
+	echo "${LOG}" | grep -q "Remote interface available at http://localhost:7474/" && break
+	if (echo "${LOG}" | grep -E 'Error'); then
+		printf "${RED}Neo4j container failed${NC}\n"
+		echo "${LOG}"
+		exit 1
+	fi
 done
 
 run_bloodhound
 
 echo Wait until bloodhound is ready ...
-until podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1| grep -q "Server started successfully"
-do
-    sleep 1
-    if ! podman container exists "$BLOODHOUND_CONTAINER" ; then
-        printf "${RED}BloodHound container failed${NC}\n"
-        podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER"
-        exit 1
-    fi
+while true; do
+	sleep 1
+	LOG="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1)"
+	echo "${LOG}" | grep -q "Server started successfully" && break
+	if (echo "${LOG}" | grep -qE '^(\{"level":"(error|fatal)")|(Error: )'); then
+		printf "${RED}BloodHound container failed${NC}\n"
+		echo "${LOG}"
+		exit 1
+	fi
 done
 
 echo "Setting initial password ..."
