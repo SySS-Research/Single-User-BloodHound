@@ -30,6 +30,9 @@ NEO4J_VOL="$DATA_DIR/neo4j"
 POSTGRES_VOL="$DATA_DIR/postgres"
 NETWORK="BloodHound-CE-network"
 
+BLOODHOUND_ADMIN_NAME="admin"
+BLOODHOUND_ADMIN_PASSWORD="admin"
+
 BLOODHOUND_IMAGE="docker.io/specterops/bloodhound:${BLOODHOUND_TAG:-latest}"
 NEO4J_IMAGE="docker.io/library/neo4j:4.4"
 POSTGRES_IMAGE="docker.io/library/postgres:16"
@@ -112,6 +115,8 @@ function run_bloodhound() {
 			-e bhe_disable_cypher_qc="${bhe_disable_cypher_qc:-false}" \
 			-e bhe_database_connection="user=bloodhound password=bloodhoundcommunityedition dbname=bloodhound host=app-db" \
 			-e bhe_neo4j_connection="neo4j://neo4j:bloodhoundcommunityedition@graph-db:7687/" \
+			-e bhe_default_admin_principal_name="$BLOODHOUND_ADMIN_NAME" \
+			-e bhe_default_admin_password="$BLOODHOUND_ADMIN_PASSWORD" \
 			"$BLOODHOUND_IMAGE" \
 			>/dev/null
 }
@@ -146,11 +151,6 @@ while true; do
 		exit 1
 	fi
 done
-
-echo "Setting initial password ..."
-# Set creds: admin/admin
-DIGEST='$argon2id$v=19$m=1048576,t=1,p=8$U0diM2hYRWl0QVltODlQc25XRnM=$at3dtmvaCpfVah8ltbba2w=='
-podman exec -it "$POSTGRES_CONTAINER" psql -d bloodhound bloodhound -c "UPDATE auth_secrets SET digest='$DIGEST',expires_at='2033-01-01 00:00:00+00';" >/dev/null
 
 printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
 printf "${GREEN}Login with admin/admin${NC}\n"
