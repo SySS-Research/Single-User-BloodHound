@@ -79,7 +79,7 @@ function run_postgres() {
 			--net "$NETWORK" \
 			--network-alias app-db \
 			--name "$POSTGRES_CONTAINER" \
-			--volume $POSTGRES_VOL:/var/lib/postgresql/data \
+			--volume "$POSTGRES_VOL":/var/lib/postgresql/data \
 			-e PGUSER=bloodhound \
 			-e POSTGRES_USER=bloodhound \
 			-e POSTGRES_PASSWORD=bloodhoundcommunityedition \
@@ -97,7 +97,7 @@ function run_neo4j() {
 			--net "$NETWORK" \
 			--network-alias graph-db \
 			--name "$NEO4J_CONTAINER" \
-			--volume $NEO4J_VOL:/data \
+			--volume "$NEO4J_VOL":/data \
 			-e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
 			"$NEO4J_IMAGE" \
 			>/dev/null
@@ -111,7 +111,7 @@ function run_bloodhound() {
 			--net "$NETWORK" \
 			--network-alias bloodhound \
 			--name "$BLOODHOUND_CONTAINER" \
-			--publish 127.0.0.1:${PORT}:8080 \
+			--publish 127.0.0.1:"${PORT}":8080 \
 			-e bhe_disable_cypher_qc="${bhe_disable_cypher_qc:-false}" \
 			-e bhe_database_connection="user=bloodhound password=bloodhoundcommunityedition dbname=bloodhound host=app-db" \
 			-e bhe_neo4j_connection="neo4j://neo4j:bloodhoundcommunityedition@graph-db:7687/" \
@@ -132,7 +132,7 @@ while true; do
 	LOG="$(podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1)"
 	echo "${LOG}" | grep -q "Remote interface available at http://localhost:7474/" && break
 	if (echo "${LOG}" | grep -E 'Error'); then
-		printf "${RED}Neo4j container failed${NC}\n"
+		echo "${RED}Neo4j container failed${NC}"
 		echo "${LOG}"
 		exit 1
 	fi
@@ -146,14 +146,14 @@ while true; do
 	LOG="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1)"
 	echo "${LOG}" | grep -q "Server started successfully" && break
 	if (echo "${LOG}" | grep -qE '^(\{"level":"(error|fatal)")|(Error: )'); then
-		printf "${RED}BloodHound container failed${NC}\n"
+		echo "${RED}BloodHound container failed${NC}"
 		echo "${LOG}"
 		exit 1
 	fi
 done
 
-printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
-printf "${GREEN}Login with admin/admin${NC}\n"
+echo "${GREEN}Success! Go to http://localhost:$PORT${NC}"
+echo "${GREEN}Login with ${BLOODHOUND_ADMIN_NAME}/${BLOODHOUND_ADMIN_PASSWORD}${NC}"
 echo "Workspace: ${WORKSPACE}"
 echo "Press CTRL-C when you're done."
 
