@@ -108,6 +108,7 @@ function run_bloodhound() {
 		podman run \
 			--rm \
 			--replace \
+			--detach \
 			--net "$NETWORK" \
 			--network-alias bloodhound \
 			--name "$BLOODHOUND_CONTAINER" \
@@ -132,8 +133,8 @@ while true; do
 	LOG="$(podman logs --since "$TIMESTAMP" "$NEO4J_CONTAINER" 2>&1)"
 	echo "${LOG}" | grep -q "Remote interface available at http://localhost:7474/" && break
 	if (echo "${LOG}" | grep -E 'Error'); then
-		echo "${RED}Neo4j container failed${NC}"
 		echo "${LOG}"
+		printf "${RED}Neo4j container failed${NC}\n"
 		exit 1
 	fi
 done
@@ -144,18 +145,23 @@ echo Wait until bloodhound is ready ...
 while true; do
 	sleep 1
 	LOG="$(podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER" 2>&1)"
-	echo "${LOG}" | grep -q "Server started successfully" && break
+	(echo "${LOG}" | grep -q "Server started successfully") && break
 	if (echo "${LOG}" | grep -qE '^(\{"level":"(error|fatal)")|(Error: )'); then
-		echo "${RED}BloodHound container failed${NC}"
 		echo "${LOG}"
+		printf "${RED}BloodHound container failed${NC}\n"
 		exit 1
 	fi
 done
 
-echo "${GREEN}Success! Go to http://localhost:$PORT${NC}"
-echo "${GREEN}Login with ${BLOODHOUND_ADMIN_NAME}/${BLOODHOUND_ADMIN_PASSWORD}${NC}"
+# Avoid having to choose a new password
+EXPIRY="$(date -I -d 1year) 00:00:00+00"
+podman exec "$POSTGRES_CONTAINER" psql -q -U "bloodhound" -d "bloodhound" -c \
+	"UPDATE auth_secrets SET expires_at='$EXPIRY' WHERE id='1';"
+
+printf "${GREEN}Success! Go to http://localhost:$PORT${NC}\n"
+printf "${GREEN}Login with ${BLOODHOUND_ADMIN_NAME}/${BLOODHOUND_ADMIN_PASSWORD}${NC}\n"
 echo "Workspace: ${WORKSPACE}"
 echo "Press CTRL-C when you're done."
 
 podman logs --since "$TIMESTAMP" "$BLOODHOUND_CONTAINER"
-podman attach "$BLOODHOUND_CONTAINER" | grep --color -E 'error|$'
+podman attach "$BLOODHOUND_CONTAINER" | grep --color -E 'error|Initial Password Set To:|$'
