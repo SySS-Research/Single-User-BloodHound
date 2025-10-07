@@ -1,0 +1,25 @@
+[project]
+name = "dockerhound"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Adrian Vollmer", email = "adrian.vollmer@syss.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.0.0"
+]
+
+[project.scripts]
+dockerhound = "dockerhound:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18.2",
+    "ruff>=0.13.3",
+]
