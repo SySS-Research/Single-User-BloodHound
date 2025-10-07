@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import click
 
@@ -199,7 +199,7 @@ class Config:
 class ContainerManager(ABC):
     """Base class for container management."""
     
-    def __init__(self, config: Config, run_command_fn):
+    def __init__(self, config: Config, run_command_fn: Callable):
         self.config = config
         self._run_command = run_command_fn
         self.timestamp = str(int(time.time()))
@@ -224,14 +224,14 @@ class ContainerManager(ABC):
         """Get the log patterns that indicate container failure."""
         pass
     
-    def start(self):
+    def start(self) -> None:
         """Start the container."""
         container_name = self.get_container_name()
         print(f"Running {container_name.lower()} container ...")
         cmd = self.get_run_command()
         self._run_command(cmd)
     
-    def wait_for_ready(self):
+    def wait_for_ready(self) -> None:
         """Wait for the container to be ready."""
         container_name = self.get_container_name()
         print(f"Wait until {container_name.lower()} is ready ...")
@@ -267,7 +267,7 @@ class ContainerManager(ABC):
 class NetworkManager:
     """Manages container networks."""
     
-    def __init__(self, config: Config, run_command_fn):
+    def __init__(self, config: Config, run_command_fn: Callable):
         self.config = config
         self._run_command = run_command_fn
         self._created_network = False
@@ -283,7 +283,7 @@ class NetworkManager:
             print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
             return False
     
-    def setup(self):
+    def setup(self) -> None:
         """Create the container network if it doesn't exist."""
         if not self.network_exists():
             try:
@@ -295,7 +295,7 @@ class NetworkManager:
                     print(f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}")
                 raise
     
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up the network if we created it."""
         if self._created_network:
             try:
@@ -342,7 +342,7 @@ class PostgresManager(ContainerManager):
     def get_error_log_patterns(self) -> List[str]:
         return ["FATAL:", "ERROR:", "could not"]
     
-    def set_password_expiry(self):
+    def set_password_expiry(self) -> None:
         """Set the admin password to not expire for a year."""
         expiry = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d 00:00:00+00")
         cmd = [
@@ -444,7 +444,7 @@ class BloodhoundManager(ContainerManager):
     def get_error_log_patterns(self) -> List[str]:
         return ['"level":"error"', '"level":"fatal"', "Error: "]
     
-    def attach_for_monitoring(self):
+    def attach_for_monitoring(self) -> None:
         """Attach to BloodHound container for monitoring."""
         try:
             # Show logs first
@@ -483,21 +483,21 @@ class BloodHoundCE:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def __enter__(self):
+    def __enter__(self) -> "BloodHoundCE":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit with cleanup."""
         self.cleanup()
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals gracefully."""
         print("\nStopping containers ...")
         self.cleanup()
         sys.exit(0)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up all resources."""
         self._stop_containers()
         self.network_manager.cleanup()
@@ -537,51 +537,51 @@ class BloodHoundCE:
             print(f"{Colors.RED}Failed to check container existence: {e}{Colors.NC}")
             return False
 
-    def setup_directories(self):
+    def setup_directories(self) -> None:
         """Create necessary directories."""
         self.config.data_dir.mkdir(parents=True, exist_ok=True)
         self.config.neo4j_vol.mkdir(parents=True, exist_ok=True)
         self.config.postgres_vol.mkdir(parents=True, exist_ok=True)
 
-    def setup_network(self):
+    def setup_network(self) -> None:
         """Create the container network if it doesn't exist."""
         self.network_manager.setup()
 
-    def pull_images(self):
+    def pull_images(self) -> None:
         """Pull all required container images."""
         images = [self.config.bloodhound_image, self.config.neo4j_image, self.config.postgres_image]
         for image in images:
             print(f"Pulling {image}...")
             self._run_command([self.config.backend, "pull", image])
 
-    def run_postgres(self):
+    def run_postgres(self) -> None:
         """Start the PostgreSQL container."""
         self.postgres_manager.start()
         self._started_containers.append(self.config.postgres_container)
 
-    def run_neo4j(self):
+    def run_neo4j(self) -> None:
         """Start the Neo4j container."""
         self.neo4j_manager.start()
         self._started_containers.append(self.config.neo4j_container)
 
-    def run_bloodhound(self):
+    def run_bloodhound(self) -> None:
         """Start the BloodHound container."""
         self.bloodhound_manager.start()
         self._started_containers.append(self.config.bloodhound_container)
 
-    def wait_for_neo4j(self):
+    def wait_for_neo4j(self) -> None:
         """Wait for Neo4j to be ready."""
         self.neo4j_manager.wait_for_ready()
 
-    def wait_for_bloodhound(self):
+    def wait_for_bloodhound(self) -> None:
         """Wait for BloodHound to be ready."""
         self.bloodhound_manager.wait_for_ready()
 
-    def set_password_expiry(self):
+    def set_password_expiry(self) -> None:
         """Set the admin password to not expire for a year."""
         self.postgres_manager.set_password_expiry()
 
-    def _stop_containers(self):
+    def _stop_containers(self) -> None:
         """Stop all containers."""
         # Stop containers in reverse order of creation, including BloodHound
         containers = [self.config.bloodhound_container, self.config.neo4j_container, self.config.postgres_container]
@@ -595,7 +595,7 @@ class BloodHoundCE:
                     # Container may not exist or backend unavailable - continue cleanup
                     pass
 
-    def _cleanup_network(self):
+    def _cleanup_network(self) -> None:
         """Clean up the created network."""
         try:
             print(f"Removing network {self.config.network}...")
@@ -605,11 +605,11 @@ class BloodHoundCE:
             # Network may not exist or backend unavailable - continue cleanup
             pass
 
-    def attach_to_bloodhound(self):
+    def attach_to_bloodhound(self) -> None:
         """Attach to BloodHound container for monitoring."""
         self.bloodhound_manager.attach_for_monitoring()
 
-    def run(self):
+    def run(self) -> None:
         """Main execution flow."""
         try:
             self.setup_directories()
@@ -701,7 +701,7 @@ def main(
     workspace: str,
     data_dir: Optional[str],
     bolt_port: Optional[int],
-    command: Optional[str],
+    command: str,
 ) -> None:
     """Single User BloodHound CE - Run BloodHound Community Edition in containers."""
 
