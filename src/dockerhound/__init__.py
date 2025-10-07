@@ -18,13 +18,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, List, Optional
 
+import logging
+
 import click
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.panel import Panel
 
 
-class Colors:
-    RED = "\033[0;31m"
-    GREEN = "\033[0;32m"
-    NC = "\033[0m"
+# Initialize logging with rich handler
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="INFO", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+)
+
+logger = logging.getLogger("dockerhound")
 
 
 # Constants
@@ -84,16 +92,12 @@ class Config:
     def _validate_port(port: int, port_name: str) -> None:
         """Validate port number is in valid range."""
         if not (1 <= port <= 65535):
-            print(
-                f"{Colors.RED}Error: {port_name} ({port}) must be between 1 and 65535{Colors.NC}"
-            )
-            print(
-                f"{Colors.RED}Suggestion: Use a port number like 8080, 8181, or 3000{Colors.NC}"
-            )
+            logger.error(f"{port_name} ({port}) must be between 1 and 65535")
+            logger.error("Suggestion: Use a port number like 8080, 8181, or 3000")
             sys.exit(1)
         if port < 1024:
-            print(
-                f"{Colors.RED}Warning: {port_name} ({port}) is a privileged port. You may need sudo{Colors.NC}"
+            logger.warning(
+                f"Warning: {port_name} ({port}) is a privileged port. You may need sudo"
             )
 
     @staticmethod
@@ -102,11 +106,9 @@ class Config:
         import re
 
         if not re.match(r"^[a-zA-Z0-9_-]+$", workspace):
-            print(
-                f"{Colors.RED}Error: workspace '{workspace}' contains invalid characters{Colors.NC}"
-            )
-            print(
-                f"{Colors.RED}Suggestion: Use only letters, numbers, underscores, and hyphens{Colors.NC}"
+            logger.error(f"workspace '{workspace}' contains invalid characters")
+            logger.error(
+                "Suggestion: Use only letters, numbers, underscores, and hyphens"
             )
             sys.exit(1)
 
@@ -116,27 +118,23 @@ class Config:
         try:
             # Check if parent exists and is writable
             if not data_path.parent.exists():
-                print(
-                    f"{Colors.RED}Error: Parent directory {data_path.parent} does not exist{Colors.NC}"
-                )
-                print(
-                    f"{Colors.RED}Suggestion: Create the parent directory first: mkdir -p {data_path.parent}{Colors.NC}"
+                logger.error(f"Parent directory {data_path.parent} does not exist")
+                logger.error(
+                    f"Suggestion: Create the parent directory first: mkdir -p {data_path.parent}"
                 )
                 sys.exit(1)
 
             if not os.access(data_path.parent, os.W_OK):
-                print(
-                    f"{Colors.RED}Error: No write permission for {data_path.parent}{Colors.NC}"
-                )
-                print(
-                    f"{Colors.RED}Suggestion: Check directory permissions or run with appropriate privileges{Colors.NC}"
+                logger.error(f"No write permission for {data_path.parent}")
+                logger.error(
+                    "Suggestion: Check directory permissions or run with appropriate privileges"
                 )
                 sys.exit(1)
 
         except OSError as e:
-            print(f"{Colors.RED}Error: Cannot access data directory: {e}{Colors.NC}")
-            print(
-                f"{Colors.RED}Suggestion: Check the path exists and you have permission to access it{Colors.NC}"
+            logger.error(f"Cannot access data directory: {e}")
+            logger.error(
+                "Suggestion: Check the path exists and you have permission to access it"
             )
             sys.exit(1)
 
@@ -148,16 +146,16 @@ class Config:
             free_gb = stat.free / (1024**3)
 
             if free_gb < min_gb:
-                print(
-                    f"{Colors.RED}Error: Insufficient disk space. Need {min_gb:.1f}GB, have {free_gb:.1f}GB{Colors.NC}"
+                logger.error(
+                    f"Insufficient disk space. Need {min_gb:.1f}GB, have {free_gb:.1f}GB"
                 )
-                print(
-                    f"{Colors.RED}Suggestion: Free up disk space or use a different data directory{Colors.NC}"
+                logger.error(
+                    "Suggestion: Free up disk space or use a different data directory"
                 )
                 sys.exit(1)
 
         except OSError as e:
-            print(f"{Colors.RED}Warning: Cannot check disk space: {e}{Colors.NC}")
+            logger.warning(f"Warning: Cannot check disk space: {e}")
             # Continue anyway - disk space check is not critical
 
     @classmethod
@@ -180,11 +178,11 @@ class Config:
         if bolt_port is not None:
             cls._validate_port(bolt_port, "bolt_port")
             if bolt_port == port:
-                print(
-                    f"{Colors.RED}Error: bolt_port ({bolt_port}) cannot be the same as port ({port}){Colors.NC}"
+                logger.error(
+                    f"bolt_port ({bolt_port}) cannot be the same as port ({port})"
                 )
-                print(
-                    f"{Colors.RED}Suggestion: Use different port numbers or omit --bolt-port{Colors.NC}"
+                logger.error(
+                    "Suggestion: Use different port numbers or omit --bolt-port"
                 )
                 sys.exit(1)
 
@@ -256,14 +254,14 @@ class ContainerManager(ABC):
     def start(self) -> None:
         """Start the container."""
         container_name = self.get_container_name()
-        print(f"Running {container_name.lower()} container ...")
+        logger.info(f"Running {container_name.lower()} container ...")
         cmd = self.get_run_command()
         self._run_command(cmd)
 
     def wait_for_ready(self) -> None:
         """Wait for the container to be ready."""
         container_name = self.get_container_name()
-        print(f"Wait until {container_name.lower()} is ready ...")
+        logger.info(f"Wait until {container_name.lower()} is ready ...")
 
         while True:
             time.sleep(1)
@@ -286,10 +284,8 @@ class ContainerManager(ABC):
 
                     error_patterns = self.get_error_log_patterns()
                     if any(pattern in logs for pattern in error_patterns):
-                        print(logs)
-                        print(
-                            f"{Colors.RED}{container_name} container failed{Colors.NC}"
-                        )
+                        logger.error(logs)
+                        logger.error(f"{container_name} container failed")
                         sys.exit(1)
             except Exception:
                 continue
@@ -312,7 +308,7 @@ class NetworkManager:
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError) as e:
-            print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
+            logger.error(f"Failed to check network existence: {e}")
             return False
 
     def setup(self) -> None:
@@ -324,12 +320,10 @@ class NetworkManager:
                 )
                 self._created_network = True
             except subprocess.CalledProcessError as e:
-                print(
-                    f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}"
-                )
+                logger.error(f"Failed to create network '{self.config.network}'")
                 if "already exists" in str(e).lower():
-                    print(
-                        f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}"
+                    logger.error(
+                        f"Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}"
                     )
                 raise
 
@@ -503,7 +497,7 @@ class BloodhoundManager(ContainerManager):
                 check=False,
             )
             if result.returncode == 0:
-                print(result.stdout)
+                logger.info(result.stdout)
 
             # Attach to container (this will block until interrupted)
             subprocess.run(
@@ -538,7 +532,7 @@ class BloodHoundCE:
 
     def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals gracefully."""
-        print("\nStopping containers ...")
+        logger.info("\nStopping containers ...")
         self.cleanup()
         sys.exit(0)
 
@@ -557,22 +551,20 @@ class BloodHoundCE:
             else:
                 return subprocess.run(cmd, stdout=subprocess.DEVNULL, check=check)
         except subprocess.CalledProcessError as e:
-            print(f"{Colors.RED}Command failed: {' '.join(cmd)}{Colors.NC}")
+            logger.error(f"Command failed: {' '.join(cmd)}")
             if capture_output and e.stderr:
-                print(f"{Colors.RED}{e.stderr}{Colors.NC}")
+                logger.error(f"{e.stderr}")
 
             # Provide helpful suggestions for common failures
             if "not found" in str(e).lower() or "no such" in str(e).lower():
-                print(
-                    f"{Colors.RED}Suggestion: Check if {cmd[0]} is installed and in PATH{Colors.NC}"
-                )
+                logger.error(f"Suggestion: Check if {cmd[0]} is installed and in PATH")
             elif "permission denied" in str(e).lower():
-                print(
-                    f"{Colors.RED}Suggestion: Try running with appropriate privileges or check file permissions{Colors.NC}"
+                logger.error(
+                    "Suggestion: Try running with appropriate privileges or check file permissions"
                 )
             elif "port" in str(e).lower() and "already" in str(e).lower():
-                print(
-                    f"{Colors.RED}Suggestion: Use a different port with --port flag or stop the conflicting service{Colors.NC}"
+                logger.error(
+                    "Suggestion: Use a different port with --port flag or stop the conflicting service"
                 )
 
             raise
@@ -585,7 +577,7 @@ class BloodHoundCE:
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError) as e:
-            print(f"{Colors.RED}Failed to check container existence: {e}{Colors.NC}")
+            logger.error(f"Failed to check container existence: {e}")
             return False
 
     def setup_directories(self) -> None:
@@ -606,7 +598,7 @@ class BloodHoundCE:
             self.config.postgres_image,
         ]
         for image in images:
-            print(f"Pulling {image}...")
+            logger.info(f"Pulling {image}...")
             self._run_command([self.config.backend, "pull", image])
 
     def run_postgres(self) -> None:
@@ -647,7 +639,7 @@ class BloodHoundCE:
         for container in containers:
             if container in self._started_containers:
                 try:
-                    print(f"Stopping container {container}...")
+                    logger.info(f"Stopping container {container}...")
                     self._run_command(
                         [self.config.backend, "stop", "-i", container], check=False
                     )
@@ -659,7 +651,7 @@ class BloodHoundCE:
     def _cleanup_network(self) -> None:
         """Clean up the created network."""
         try:
-            print(f"Removing network {self.config.network}...")
+            logger.info(f"Removing network {self.config.network}...")
             self._run_command(
                 [self.config.backend, "network", "rm", self.config.network], check=False
             )
@@ -693,20 +685,22 @@ class BloodHoundCE:
             self.set_password_expiry()
 
             # Success message
-            print(
-                f"{Colors.GREEN}Success! Go to http://localhost:{self.config.port}{Colors.NC}"
+            success_panel = Panel.fit(
+                f"[green]Success! BloodHound CE is running[/green]\n\n"
+                f"[bold blue]URL:[/bold blue] http://localhost:{self.config.port}\n"
+                f"[bold blue]Login:[/bold blue] {self.config.admin_name}/{self.config.admin_password}\n"
+                f"[bold blue]Workspace:[/bold blue] {self.config.workspace}\n\n"
+                f"[yellow]Press CTRL-C when you're done.[/yellow]",
+                title="[bold green]BloodHound CE Ready[/bold green]",
+                border_style="green",
             )
-            print(
-                f"{Colors.GREEN}Login with {self.config.admin_name}/{self.config.admin_password}{Colors.NC}"
-            )
-            print(f"Workspace: {self.config.workspace}")
-            print("Press CTRL-C when you're done.")
+            Console().print(success_panel)
 
             # Attach to container for log monitoring
             self.attach_to_bloodhound()
 
         except Exception as e:
-            print(f"{Colors.RED}Setup failed: {e}{Colors.NC}")
+            logger.error(f"Setup failed: {e}")
             self.cleanup()
             raise
 
@@ -723,12 +717,10 @@ def detect_backend() -> str:
         except FileNotFoundError:
             continue
 
-    print(f"{Colors.RED}Neither podman nor docker found.{Colors.NC}")
-    print(f"{Colors.RED}Suggestion: Install one of the following:{Colors.NC}")
-    print(
-        f"{Colors.RED}  - Podman: https://podman.io/getting-started/installation{Colors.NC}"
-    )
-    print(f"{Colors.RED}  - Docker: https://docs.docker.com/get-docker/{Colors.NC}")
+    logger.error("Neither podman nor docker found.")
+    logger.error("Suggestion: Install one of the following:")
+    logger.error("  - Podman: https://podman.io/getting-started/installation")
+    logger.error("  - Docker: https://docs.docker.com/get-docker/")
     sys.exit(1)
 
 
