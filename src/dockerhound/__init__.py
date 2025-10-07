@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Single User BloodHound CE
+DockerHound
 Python CLI implementation of the BloodHound CE containerized deployment.
 
-MIT License - Copyright (c) 2023 SySS Research, Adrian Vollmer
+MIT License - Copyright (c) 2023-2025 SySS Research, Adrian Vollmer
 """
 
 import os
@@ -44,11 +44,11 @@ class BloodHoundCE:
             xdg_data_home = os.environ.get(
                 "XDG_DATA_HOME", os.path.expanduser("~/.local/share")
             )
-            self.data_dir = Path(xdg_data_home) / "BloodHound-CE" / workspace
+            self.data_dir = Path(xdg_data_home) / "dockerhound" / workspace
 
         self.neo4j_vol = self.data_dir / "neo4j"
         self.postgres_vol = self.data_dir / "postgres"
-        self.network = "BloodHound-CE-network"
+        self.network = "DockerHound-CE-network"
 
         # Credentials
         self.admin_name = "admin"
@@ -60,9 +60,9 @@ class BloodHoundCE:
         self.postgres_image = "docker.io/library/postgres:16"
 
         # Container names
-        self.bloodhound_container = "BloodHound-CE_BH"
-        self.neo4j_container = "BloodHound-CE_Neo4j"
-        self.postgres_container = "BloodHound-CE_PSQL"
+        self.bloodhound_container = "DockerHound-CE_BH"
+        self.neo4j_container = "DockerHound-CE_Neo4j"
+        self.postgres_container = "DockerHound-CE_PSQL"
 
         self.timestamp = str(int(time.time()))
 
