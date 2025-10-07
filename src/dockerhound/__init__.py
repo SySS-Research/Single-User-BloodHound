@@ -7,14 +7,16 @@ MIT License - Copyright (c) 2023-2025 SySS Research, Adrian Vollmer
 """
 
 import os
-import sys
+import shutil
 import signal
 import subprocess
+import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import click
 
@@ -116,6 +118,22 @@ class Config:
             print(f"{Colors.RED}Suggestion: Check the path exists and you have permission to access it{Colors.NC}")
             sys.exit(1)
     
+    @staticmethod
+    def _validate_disk_space(data_path: Path, min_gb: float = 2.0) -> None:
+        """Validate sufficient disk space is available."""
+        try:
+            stat = shutil.disk_usage(data_path.parent)
+            free_gb = stat.free / (1024 ** 3)
+            
+            if free_gb < min_gb:
+                print(f"{Colors.RED}Error: Insufficient disk space. Need {min_gb:.1f}GB, have {free_gb:.1f}GB{Colors.NC}")
+                print(f"{Colors.RED}Suggestion: Free up disk space or use a different data directory{Colors.NC}")
+                sys.exit(1)
+                
+        except OSError as e:
+            print(f"{Colors.RED}Warning: Cannot check disk space: {e}{Colors.NC}")
+            # Continue anyway - disk space check is not critical
+    
     @classmethod
     def create(
         cls,
@@ -151,8 +169,9 @@ class Config:
             )
             data_path = Path(xdg_data_home) / "dockerhound" / workspace
         
-        # Validate data directory access
+        # Validate data directory access and disk space
         cls._validate_data_directory(data_path)
+        cls._validate_disk_space(data_path)
         
         # Get BloodHound image with tag
         bloodhound_tag = os.environ.get("BLOODHOUND_TAG", "latest")
@@ -180,16 +199,32 @@ class BloodHoundCE:
     def __init__(self, config: Config):
         self.config = config
         self.timestamp = str(int(time.time()))
+        self._started_containers: List[str] = []
+        self._created_network = False
 
         # Set up signal handling
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup."""
+        self.cleanup()
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
         print("\nStopping containers ...")
-        self._stop_containers()
+        self.cleanup()
         sys.exit(0)
+
+    def cleanup(self):
+        """Clean up all resources."""
+        self._stop_containers()
+        if self._created_network:
+            self._cleanup_network()
 
     def _run_command(
         self, cmd: list[str], capture_output: bool = False, check: bool = True
@@ -248,6 +283,7 @@ class BloodHoundCE:
         if not self._network_exists():
             try:
                 self._run_command([self.config.backend, "network", "create", self.config.network])
+                self._created_network = True
             except subprocess.CalledProcessError as e:
                 print(f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}")
                 if "already exists" in str(e).lower():
@@ -289,6 +325,7 @@ class BloodHoundCE:
             self.config.postgres_image,
         ]
         self._run_command(cmd)
+        self._started_containers.append(self.config.postgres_container)
 
     def run_neo4j(self):
         """Start the Neo4j container."""
@@ -323,6 +360,7 @@ class BloodHoundCE:
             ]
         )
         self._run_command(cmd)
+        self._started_containers.append(self.config.neo4j_container)
 
     def run_bloodhound(self):
         """Start the BloodHound container."""
@@ -354,6 +392,7 @@ class BloodHoundCE:
             self.config.bloodhound_image,
         ]
         self._run_command(cmd)
+        self._started_containers.append(self.config.bloodhound_container)
 
     def wait_for_neo4j(self):
         """Wait for Neo4j to be ready."""
@@ -379,6 +418,7 @@ class BloodHoundCE:
                     if "Error" in logs:
                         print(logs)
                         print(f"{Colors.RED}Neo4j container failed{Colors.NC}")
+                        self.cleanup()
                         sys.exit(1)
             except (subprocess.SubprocessError, FileNotFoundError) as e:
                 print(f"{Colors.RED}Failed to check Neo4j logs: {e}{Colors.NC}")
@@ -411,6 +451,7 @@ class BloodHoundCE:
                     ):
                         print(logs)
                         print(f"{Colors.RED}BloodHound container failed{Colors.NC}")
+                        self.cleanup()
                         sys.exit(1)
             except (subprocess.SubprocessError, FileNotFoundError) as e:
                 print(f"{Colors.RED}Failed to check BloodHound logs: {e}{Colors.NC}")
@@ -436,13 +477,27 @@ class BloodHoundCE:
 
     def _stop_containers(self):
         """Stop all containers."""
-        containers = [self.config.neo4j_container, self.config.postgres_container]
+        # Stop containers in reverse order of creation, including BloodHound
+        containers = [self.config.bloodhound_container, self.config.neo4j_container, self.config.postgres_container]
         for container in containers:
-            try:
-                self._run_command([self.config.backend, "stop", "-i", container], check=False)
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # Container may not exist or backend unavailable - continue cleanup
-                pass
+            if container in self._started_containers:
+                try:
+                    print(f"Stopping container {container}...")
+                    self._run_command([self.config.backend, "stop", "-i", container], check=False)
+                    self._started_containers.remove(container)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    # Container may not exist or backend unavailable - continue cleanup
+                    pass
+
+    def _cleanup_network(self):
+        """Clean up the created network."""
+        try:
+            print(f"Removing network {self.config.network}...")
+            self._run_command([self.config.backend, "network", "rm", self.config.network], check=False)
+            self._created_network = False
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Network may not exist or backend unavailable - continue cleanup
+            pass
 
     def attach_to_bloodhound(self):
         """Attach to BloodHound container for monitoring."""
@@ -469,33 +524,39 @@ class BloodHoundCE:
 
     def run(self):
         """Main execution flow."""
-        self.setup_directories()
-        self.setup_network()
+        try:
+            self.setup_directories()
+            self.setup_network()
 
-        # Start containers
-        self.run_postgres()
-        self.run_neo4j()
+            # Start containers
+            self.run_postgres()
+            self.run_neo4j()
 
-        # Wait for Neo4j (PostgreSQL is typically faster)
-        self.wait_for_neo4j()
+            # Wait for Neo4j (PostgreSQL is typically faster)
+            self.wait_for_neo4j()
 
-        # Start BloodHound
-        self.run_bloodhound()
-        self.wait_for_bloodhound()
+            # Start BloodHound
+            self.run_bloodhound()
+            self.wait_for_bloodhound()
 
-        # Configure password expiry
-        self.set_password_expiry()
+            # Configure password expiry
+            self.set_password_expiry()
 
-        # Success message
-        print(f"{Colors.GREEN}Success! Go to http://localhost:{self.config.port}{Colors.NC}")
-        print(
-            f"{Colors.GREEN}Login with {self.config.admin_name}/{self.config.admin_password}{Colors.NC}"
-        )
-        print(f"Workspace: {self.config.workspace}")
-        print("Press CTRL-C when you're done.")
+            # Success message
+            print(f"{Colors.GREEN}Success! Go to http://localhost:{self.config.port}{Colors.NC}")
+            print(
+                f"{Colors.GREEN}Login with {self.config.admin_name}/{self.config.admin_password}{Colors.NC}"
+            )
+            print(f"Workspace: {self.config.workspace}")
+            print("Press CTRL-C when you're done.")
 
-        # Attach to container for log monitoring
-        self.attach_to_bloodhound()
+            # Attach to container for log monitoring
+            self.attach_to_bloodhound()
+        
+        except Exception as e:
+            print(f"{Colors.RED}Setup failed: {e}{Colors.NC}")
+            self.cleanup()
+            raise
 
 
 def detect_backend() -> str:
@@ -570,13 +631,14 @@ def main(
         bolt_port=bolt_port,
     )
 
-    bh = BloodHoundCE(config)
-
     if command == "pull":
+        bh = BloodHoundCE(config)
         bh.pull_images()
         return
 
-    bh.run()
+    # Use context manager for automatic cleanup on failures
+    with BloodHoundCE(config) as bh:
+        bh.run()
 
 
 if __name__ == "__main__":
