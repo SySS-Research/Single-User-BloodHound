@@ -55,7 +55,8 @@ POSTGRES_CONTAINER = "DockerHound-CE_PSQL"
 DB_USER = "bloodhound"
 DB_PASSWORD = "bloodhoundcommunityedition"
 DB_NAME = "bloodhound"
-NEO4J_AUTH = "neo4j/bloodhoundcommunityedition"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "bloodhoundcommunityedition"
 
 
 @dataclass
@@ -86,6 +87,9 @@ class Config:
     bloodhound_container: str = BLOODHOUND_CONTAINER
     neo4j_container: str = NEO4J_CONTAINER
     postgres_container: str = POSTGRES_CONTAINER
+
+    # Debug flag
+    debug: bool = False
 
     @staticmethod
     def _validate_port(port: int, port_name: str) -> None:
@@ -165,6 +169,7 @@ class Config:
         workspace: str = DEFAULT_WORKSPACE,
         data_dir: Optional[str] = None,
         bolt_port: Optional[int] = None,
+        debug: bool = False,
     ) -> "Config":
         """Create configuration with environment variable overrides."""
         # Apply environment variable overrides
@@ -214,6 +219,7 @@ class Config:
             bolt_port=bolt_port,
             workspace=workspace,
             data_dir=data_path,
+            debug=debug,
             neo4j_vol=data_path / "neo4j",
             postgres_vol=data_path / "postgres",
             admin_name=admin_name,
@@ -434,7 +440,7 @@ class Neo4jManager(ContainerManager):
         cmd.extend(
             [
                 "-e",
-                f"NEO4J_AUTH={NEO4J_AUTH}",
+                f"NEO4J_AUTH={NEO4J_USER}/{NEO4J_PASSWORD}",
                 self.config.neo4j_image,
             ]
         )
@@ -454,12 +460,12 @@ class BloodhoundManager(ContainerManager):
         return self.config.bloodhound_container
 
     def get_run_command(self) -> List[str]:
-        return [
+        NEO4J_CONNECTION = f"neo4j://{NEO4J_USER}:{NEO4J_PASSWORD}@graph-db:7687/"
+        result = [
             self.config.backend,
             "run",
             "--rm",
             "--replace",
-            "--detach",
             "--net",
             self.config.network,
             "--network-alias",
@@ -473,13 +479,18 @@ class BloodhoundManager(ContainerManager):
             "-e",
             f"bhe_database_connection=user={DB_USER} password={DB_PASSWORD} dbname={DB_NAME} host=app-db",
             "-e",
-            f"bhe_neo4j_connection=neo4j://{NEO4J_AUTH}@graph-db:7687/",
+            f"bhe_neo4j_connection={NEO4J_CONNECTION}",
             "-e",
             f"bhe_default_admin_principal_name={self.config.admin_name}",
             "-e",
             f"bhe_default_admin_password={self.config.admin_password}",
             self.config.bloodhound_image,
         ]
+
+        if not self.config.debug:
+            result.insert(4, "--detach")
+
+        return result
 
     def get_ready_log_pattern(self) -> str:
         return "Server started successfully"
@@ -503,7 +514,7 @@ class BloodhoundManager(ContainerManager):
                 check=False,
             )
             if result.returncode == 0:
-                logger.info(result.stdout)
+                print(result.stdout)
 
             # Attach to container (this will block until interrupted)
             subprocess.run(
@@ -552,8 +563,22 @@ class BloodHoundCE:
     ) -> subprocess.CompletedProcess:
         """Run a command with the selected backend."""
         try:
+            if self.config.debug:
+                logger.debug(f"Running command: {' '.join(cmd)}")
+
             if capture_output:
-                return subprocess.run(cmd, capture_output=True, text=True, check=check)
+                # Always capture output when requested (needed for readiness checks)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=check
+                )
+                if self.config.debug and result.stdout:
+                    logger.debug(f"Command stdout: {result.stdout}")
+                if self.config.debug and result.stderr:
+                    logger.debug(f"Command stderr: {result.stderr}")
+                return result
+            elif self.config.debug:
+                # In debug mode, show output but don't capture it
+                return subprocess.run(cmd, text=True, check=check)
             else:
                 return subprocess.run(cmd, stdout=subprocess.DEVNULL, check=check)
         except subprocess.CalledProcessError as e:
@@ -759,6 +784,11 @@ def detect_backend() -> str:
     type=int,
     help="Port to expose Neo4j bolt protocol on (default: 7687, only exposed if specified)",
 )
+@click.option(
+    "--debug",
+    is_flag=True,
+    help="Enable debug mode with verbose container output",
+)
 @click.argument("command", default="run", type=click.Choice(["run", "pull"]))
 def main(
     backend: Optional[str],
@@ -766,9 +796,15 @@ def main(
     workspace: str,
     data_dir: Optional[str],
     bolt_port: Optional[int],
+    debug: bool,
     command: str,
 ) -> None:
     """Single User BloodHound CE - Run BloodHound Community Edition in containers."""
+
+    # Set logging level based on debug flag
+    if debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
 
     # Detect backend if not specified
     if not backend:
@@ -781,6 +817,7 @@ def main(
         workspace=workspace,
         data_dir=data_dir,
         bolt_port=bolt_port,
+        debug=debug,
     )
 
     if command == "pull":
