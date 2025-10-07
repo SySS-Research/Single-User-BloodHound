@@ -98,6 +98,8 @@ function run_neo4j() {
 			--network-alias graph-db \
 			--name "$NEO4J_CONTAINER" \
 			--volume "$NEO4J_VOL":/data \
+			--publish 127.0.0.1:7474:7474 \
+			--publish 127.0.0.1:7687:7687 \
 			-e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
 			"$NEO4J_IMAGE" \
 			>/dev/null
