@@ -25,11 +25,10 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
 
-
 # Initialize logging with rich handler
 FORMAT = "%(message)s"
 logging.basicConfig(
-    level="INFO", format=FORMAT, datefmt="[%X]", handlers=[RichHandler()]
+    level="INFO", format=FORMAT, datefmt="[%X]", handlers=[RichHandler(show_path=False)]
 )
 
 logger = logging.getLogger("dockerhound")
@@ -287,6 +286,13 @@ class ContainerManager(ABC):
                         logger.error(logs)
                         logger.error(f"{container_name} container failed")
                         sys.exit(1)
+                else:
+                    #  print(result.stdout)
+                    logger.error(result.stderr.strip())
+                    logger.error(
+                        f"{container_name} container failed with returncode {result.returncode}"
+                    )
+                    sys.exit(1)
             except Exception:
                 continue
 
