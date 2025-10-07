@@ -77,6 +77,45 @@ class Config:
     neo4j_container: str = NEO4J_CONTAINER
     postgres_container: str = POSTGRES_CONTAINER
     
+    @staticmethod
+    def _validate_port(port: int, port_name: str) -> None:
+        """Validate port number is in valid range."""
+        if not (1 <= port <= 65535):
+            print(f"{Colors.RED}Error: {port_name} ({port}) must be between 1 and 65535{Colors.NC}")
+            print(f"{Colors.RED}Suggestion: Use a port number like 8080, 8181, or 3000{Colors.NC}")
+            sys.exit(1)
+        if port < 1024:
+            print(f"{Colors.RED}Warning: {port_name} ({port}) is a privileged port. You may need sudo{Colors.NC}")
+    
+    @staticmethod
+    def _validate_workspace(workspace: str) -> None:
+        """Validate workspace name contains only safe characters."""
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', workspace):
+            print(f"{Colors.RED}Error: workspace '{workspace}' contains invalid characters{Colors.NC}")
+            print(f"{Colors.RED}Suggestion: Use only letters, numbers, underscores, and hyphens{Colors.NC}")
+            sys.exit(1)
+    
+    @staticmethod
+    def _validate_data_directory(data_path: Path) -> None:
+        """Validate data directory is accessible and writable."""
+        try:
+            # Check if parent exists and is writable
+            if not data_path.parent.exists():
+                print(f"{Colors.RED}Error: Parent directory {data_path.parent} does not exist{Colors.NC}")
+                print(f"{Colors.RED}Suggestion: Create the parent directory first: mkdir -p {data_path.parent}{Colors.NC}")
+                sys.exit(1)
+            
+            if not os.access(data_path.parent, os.W_OK):
+                print(f"{Colors.RED}Error: No write permission for {data_path.parent}{Colors.NC}")
+                print(f"{Colors.RED}Suggestion: Check directory permissions or run with appropriate privileges{Colors.NC}")
+                sys.exit(1)
+                
+        except OSError as e:
+            print(f"{Colors.RED}Error: Cannot access data directory: {e}{Colors.NC}")
+            print(f"{Colors.RED}Suggestion: Check the path exists and you have permission to access it{Colors.NC}")
+            sys.exit(1)
+    
     @classmethod
     def create(
         cls,
@@ -92,6 +131,17 @@ class Config:
         workspace = os.environ.get("WORKSPACE", workspace)
         data_dir = os.environ.get("DATA_DIR", data_dir)
         
+        # Validate inputs
+        cls._validate_port(port, "port")
+        if bolt_port is not None:
+            cls._validate_port(bolt_port, "bolt_port")
+            if bolt_port == port:
+                print(f"{Colors.RED}Error: bolt_port ({bolt_port}) cannot be the same as port ({port}){Colors.NC}")
+                print(f"{Colors.RED}Suggestion: Use different port numbers or omit --bolt-port{Colors.NC}")
+                sys.exit(1)
+        
+        cls._validate_workspace(workspace)
+        
         # Determine data directory
         if data_dir:
             data_path = Path(data_dir).resolve()
@@ -100,6 +150,9 @@ class Config:
                 "XDG_DATA_HOME", os.path.expanduser("~/.local/share")
             )
             data_path = Path(xdg_data_home) / "dockerhound" / workspace
+        
+        # Validate data directory access
+        cls._validate_data_directory(data_path)
         
         # Get BloodHound image with tag
         bloodhound_tag = os.environ.get("BLOODHOUND_TAG", "latest")
@@ -151,6 +204,15 @@ class BloodHoundCE:
             print(f"{Colors.RED}Command failed: {' '.join(cmd)}{Colors.NC}")
             if capture_output and e.stderr:
                 print(f"{Colors.RED}{e.stderr}{Colors.NC}")
+            
+            # Provide helpful suggestions for common failures
+            if "not found" in str(e).lower() or "no such" in str(e).lower():
+                print(f"{Colors.RED}Suggestion: Check if {cmd[0]} is installed and in PATH{Colors.NC}")
+            elif "permission denied" in str(e).lower():
+                print(f"{Colors.RED}Suggestion: Try running with appropriate privileges or check file permissions{Colors.NC}")
+            elif "port" in str(e).lower() and "already" in str(e).lower():
+                print(f"{Colors.RED}Suggestion: Use a different port with --port flag or stop the conflicting service{Colors.NC}")
+            
             raise
 
     def _container_exists(self, name: str) -> bool:
@@ -160,7 +222,8 @@ class BloodHoundCE:
                 [self.config.backend, "container", "exists", name], check=False
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            print(f"{Colors.RED}Failed to check container existence: {e}{Colors.NC}")
             return False
 
     def _network_exists(self) -> bool:
@@ -170,7 +233,8 @@ class BloodHoundCE:
                 [self.config.backend, "network", "exists", self.config.network], check=False
             )
             return result.returncode == 0
-        except Exception:
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
             return False
 
     def setup_directories(self):
@@ -182,7 +246,13 @@ class BloodHoundCE:
     def setup_network(self):
         """Create the container network if it doesn't exist."""
         if not self._network_exists():
-            self._run_command([self.config.backend, "network", "create", self.config.network])
+            try:
+                self._run_command([self.config.backend, "network", "create", self.config.network])
+            except subprocess.CalledProcessError as e:
+                print(f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}")
+                if "already exists" in str(e).lower():
+                    print(f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}")
+                raise
 
     def pull_images(self):
         """Pull all required container images."""
@@ -310,7 +380,8 @@ class BloodHoundCE:
                         print(logs)
                         print(f"{Colors.RED}Neo4j container failed{Colors.NC}")
                         sys.exit(1)
-            except Exception:
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                print(f"{Colors.RED}Failed to check Neo4j logs: {e}{Colors.NC}")
                 continue
 
     def wait_for_bloodhound(self):
@@ -341,7 +412,8 @@ class BloodHoundCE:
                         print(logs)
                         print(f"{Colors.RED}BloodHound container failed{Colors.NC}")
                         sys.exit(1)
-            except Exception:
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                print(f"{Colors.RED}Failed to check BloodHound logs: {e}{Colors.NC}")
                 continue
 
     def set_password_expiry(self):
@@ -368,7 +440,8 @@ class BloodHoundCE:
         for container in containers:
             try:
                 self._run_command([self.config.backend, "stop", "-i", container], check=False)
-            except Exception:
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Container may not exist or backend unavailable - continue cleanup
                 pass
 
     def attach_to_bloodhound(self):
@@ -437,9 +510,10 @@ def detect_backend() -> str:
         except FileNotFoundError:
             continue
 
-    print(
-        f"{Colors.RED}Neither podman nor docker found. Please install one of them.{Colors.NC}"
-    )
+    print(f"{Colors.RED}Neither podman nor docker found.{Colors.NC}")
+    print(f"{Colors.RED}Suggestion: Install one of the following:{Colors.NC}")
+    print(f"{Colors.RED}  - Podman: https://podman.io/getting-started/installation{Colors.NC}")
+    print(f"{Colors.RED}  - Docker: https://docs.docker.com/get-docker/{Colors.NC}")
     sys.exit(1)
 
 
