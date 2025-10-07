@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -195,12 +196,288 @@ class Config:
         )
 
 
+class ContainerManager(ABC):
+    """Base class for container management."""
+    
+    def __init__(self, config: Config, run_command_fn):
+        self.config = config
+        self._run_command = run_command_fn
+        self.timestamp = str(int(time.time()))
+    
+    @abstractmethod
+    def get_container_name(self) -> str:
+        """Get the container name."""
+        pass
+    
+    @abstractmethod
+    def get_run_command(self) -> List[str]:
+        """Get the command to run the container."""
+        pass
+    
+    @abstractmethod
+    def get_ready_log_pattern(self) -> str:
+        """Get the log pattern that indicates the container is ready."""
+        pass
+    
+    @abstractmethod
+    def get_error_log_patterns(self) -> List[str]:
+        """Get the log patterns that indicate container failure."""
+        pass
+    
+    def start(self):
+        """Start the container."""
+        container_name = self.get_container_name()
+        print(f"Running {container_name.lower()} container ...")
+        cmd = self.get_run_command()
+        self._run_command(cmd)
+    
+    def wait_for_ready(self):
+        """Wait for the container to be ready."""
+        container_name = self.get_container_name()
+        print(f"Wait until {container_name.lower()} is ready ...")
+        
+        while True:
+            time.sleep(1)
+            try:
+                result = self._run_command(
+                    [
+                        self.config.backend,
+                        "logs",
+                        "--since",
+                        self.timestamp,
+                        container_name,
+                    ],
+                    capture_output=True,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    logs = result.stdout
+                    if self.get_ready_log_pattern() in logs:
+                        break
+                    
+                    error_patterns = self.get_error_log_patterns()
+                    if any(pattern in logs for pattern in error_patterns):
+                        print(logs)
+                        print(f"{Colors.RED}{container_name} container failed{Colors.NC}")
+                        sys.exit(1)
+            except Exception:
+                continue
+
+
+class NetworkManager:
+    """Manages container networks."""
+    
+    def __init__(self, config: Config, run_command_fn):
+        self.config = config
+        self._run_command = run_command_fn
+        self._created_network = False
+    
+    def network_exists(self) -> bool:
+        """Check if the network exists."""
+        try:
+            result = self._run_command(
+                [self.config.backend, "network", "exists", self.config.network], check=False
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
+            return False
+    
+    def setup(self):
+        """Create the container network if it doesn't exist."""
+        if not self.network_exists():
+            try:
+                self._run_command([self.config.backend, "network", "create", self.config.network])
+                self._created_network = True
+            except subprocess.CalledProcessError as e:
+                print(f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}")
+                if "already exists" in str(e).lower():
+                    print(f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}")
+                raise
+    
+    def cleanup(self):
+        """Clean up the network if we created it."""
+        if self._created_network:
+            try:
+                self._run_command([self.config.backend, "network", "rm", self.config.network], check=False)
+            except Exception:
+                pass
+
+
+class PostgresManager(ContainerManager):
+    """Manages PostgreSQL container."""
+    
+    def get_container_name(self) -> str:
+        return self.config.postgres_container
+    
+    def get_run_command(self) -> List[str]:
+        return [
+            self.config.backend,
+            "run",
+            "--rm",
+            "--replace",
+            "--detach",
+            "--net",
+            self.config.network,
+            "--network-alias",
+            "app-db",
+            "--name",
+            self.config.postgres_container,
+            "--volume",
+            f"{self.config.postgres_vol}:/var/lib/postgresql/data",
+            "-e",
+            f"PGUSER={DB_USER}",
+            "-e",
+            f"POSTGRES_USER={DB_USER}",
+            "-e",
+            f"POSTGRES_PASSWORD={DB_PASSWORD}",
+            "-e",
+            f"POSTGRES_DB={DB_NAME}",
+            self.config.postgres_image,
+        ]
+    
+    def get_ready_log_pattern(self) -> str:
+        return "database system is ready to accept connections"
+    
+    def get_error_log_patterns(self) -> List[str]:
+        return ["FATAL:", "ERROR:", "could not"]
+    
+    def set_password_expiry(self):
+        """Set the admin password to not expire for a year."""
+        expiry = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d 00:00:00+00")
+        cmd = [
+            self.config.backend,
+            "exec",
+            self.config.postgres_container,
+            "psql",
+            "-q",
+            "-U",
+            DB_USER,
+            "-d",
+            DB_NAME,
+            "-c",
+            f"UPDATE auth_secrets SET expires_at='{expiry}' WHERE id='1';",
+        ]
+        self._run_command(cmd)
+
+
+class Neo4jManager(ContainerManager):
+    """Manages Neo4j container."""
+    
+    def get_container_name(self) -> str:
+        return self.config.neo4j_container
+    
+    def get_run_command(self) -> List[str]:
+        cmd = [
+            self.config.backend,
+            "run",
+            "--rm",
+            "--detach",
+            "--replace",
+            "--net",
+            self.config.network,
+            "--network-alias",
+            "graph-db",
+            "--name",
+            self.config.neo4j_container,
+            "--volume",
+            f"{self.config.neo4j_vol}:/data",
+            "--publish",
+            "127.0.0.1:7474:7474",
+        ]
+        
+        # Only expose bolt port if explicitly requested
+        if self.config.bolt_port is not None:
+            cmd.extend(["--publish", f"127.0.0.1:{self.config.bolt_port}:7687"])
+        
+        cmd.extend([
+            "-e",
+            f"NEO4J_AUTH={NEO4J_AUTH}",
+            self.config.neo4j_image,
+        ])
+        return cmd
+    
+    def get_ready_log_pattern(self) -> str:
+        return "Remote interface available at http://localhost:7474/"
+    
+    def get_error_log_patterns(self) -> List[str]:
+        return ["Error"]
+
+
+class BloodhoundManager(ContainerManager):
+    """Manages BloodHound container."""
+    
+    def get_container_name(self) -> str:
+        return self.config.bloodhound_container
+    
+    def get_run_command(self) -> List[str]:
+        return [
+            self.config.backend,
+            "run",
+            "--rm",
+            "--replace",
+            "--detach",
+            "--net",
+            self.config.network,
+            "--network-alias",
+            "bloodhound",
+            "--name",
+            self.config.bloodhound_container,
+            "--publish",
+            f"127.0.0.1:{self.config.port}:8080",
+            "-e",
+            f"bhe_disable_cypher_qc={os.environ.get('bhe_disable_cypher_qc', 'false')}",
+            "-e",
+            f"bhe_database_connection=user={DB_USER} password={DB_PASSWORD} dbname={DB_NAME} host=app-db",
+            "-e",
+            f"bhe_neo4j_connection=neo4j://{NEO4J_AUTH}@graph-db:7687/",
+            "-e",
+            f"bhe_default_admin_principal_name={self.config.admin_name}",
+            "-e",
+            f"bhe_default_admin_password={self.config.admin_password}",
+            self.config.bloodhound_image,
+        ]
+    
+    def get_ready_log_pattern(self) -> str:
+        return "Server started successfully"
+    
+    def get_error_log_patterns(self) -> List[str]:
+        return ['"level":"error"', '"level":"fatal"', "Error: "]
+    
+    def attach_for_monitoring(self):
+        """Attach to BloodHound container for monitoring."""
+        try:
+            # Show logs first
+            result = self._run_command(
+                [
+                    self.config.backend,
+                    "logs",
+                    "--since",
+                    self.timestamp,
+                    self.config.bloodhound_container,
+                ],
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                print(result.stdout)
+
+            # Attach to container (this will block until interrupted)
+            subprocess.run([self.config.backend, "attach", self.config.bloodhound_container])
+        except KeyboardInterrupt:
+            pass
+
+
 class BloodHoundCE:
     def __init__(self, config: Config):
         self.config = config
-        self.timestamp = str(int(time.time()))
         self._started_containers: List[str] = []
-        self._created_network = False
+        
+        # Initialize managers
+        self.network_manager = NetworkManager(config, self._run_command)
+        self.postgres_manager = PostgresManager(config, self._run_command)
+        self.neo4j_manager = Neo4jManager(config, self._run_command)
+        self.bloodhound_manager = BloodhoundManager(config, self._run_command)
 
         # Set up signal handling
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -223,8 +500,7 @@ class BloodHoundCE:
     def cleanup(self):
         """Clean up all resources."""
         self._stop_containers()
-        if self._created_network:
-            self._cleanup_network()
+        self.network_manager.cleanup()
 
     def _run_command(
         self, cmd: list[str], capture_output: bool = False, check: bool = True
@@ -261,17 +537,6 @@ class BloodHoundCE:
             print(f"{Colors.RED}Failed to check container existence: {e}{Colors.NC}")
             return False
 
-    def _network_exists(self) -> bool:
-        """Check if the network exists."""
-        try:
-            result = self._run_command(
-                [self.config.backend, "network", "exists", self.config.network], check=False
-            )
-            return result.returncode == 0
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
-            print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
-            return False
-
     def setup_directories(self):
         """Create necessary directories."""
         self.config.data_dir.mkdir(parents=True, exist_ok=True)
@@ -280,15 +545,7 @@ class BloodHoundCE:
 
     def setup_network(self):
         """Create the container network if it doesn't exist."""
-        if not self._network_exists():
-            try:
-                self._run_command([self.config.backend, "network", "create", self.config.network])
-                self._created_network = True
-            except subprocess.CalledProcessError as e:
-                print(f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}")
-                if "already exists" in str(e).lower():
-                    print(f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}")
-                raise
+        self.network_manager.setup()
 
     def pull_images(self):
         """Pull all required container images."""
@@ -299,181 +556,30 @@ class BloodHoundCE:
 
     def run_postgres(self):
         """Start the PostgreSQL container."""
-        print("Running postgres container ...")
-        cmd = [
-            self.config.backend,
-            "run",
-            "--rm",
-            "--replace",
-            "--detach",
-            "--net",
-            self.config.network,
-            "--network-alias",
-            "app-db",
-            "--name",
-            self.config.postgres_container,
-            "--volume",
-            f"{self.config.postgres_vol}:/var/lib/postgresql/data",
-            "-e",
-            f"PGUSER={DB_USER}",
-            "-e",
-            f"POSTGRES_USER={DB_USER}",
-            "-e",
-            f"POSTGRES_PASSWORD={DB_PASSWORD}",
-            "-e",
-            f"POSTGRES_DB={DB_NAME}",
-            self.config.postgres_image,
-        ]
-        self._run_command(cmd)
+        self.postgres_manager.start()
         self._started_containers.append(self.config.postgres_container)
 
     def run_neo4j(self):
         """Start the Neo4j container."""
-        print("Running neo4j container ...")
-        cmd = [
-            self.config.backend,
-            "run",
-            "--rm",
-            "--detach",
-            "--replace",
-            "--net",
-            self.config.network,
-            "--network-alias",
-            "graph-db",
-            "--name",
-            self.config.neo4j_container,
-            "--volume",
-            f"{self.config.neo4j_vol}:/data",
-            "--publish",
-            "127.0.0.1:7474:7474",
-        ]
-
-        # Only expose bolt port if explicitly requested
-        if self.config.bolt_port is not None:
-            cmd.extend(["--publish", f"127.0.0.1:{self.config.bolt_port}:7687"])
-
-        cmd.extend(
-            [
-                "-e",
-                f"NEO4J_AUTH={NEO4J_AUTH}",
-                self.config.neo4j_image,
-            ]
-        )
-        self._run_command(cmd)
+        self.neo4j_manager.start()
         self._started_containers.append(self.config.neo4j_container)
 
     def run_bloodhound(self):
         """Start the BloodHound container."""
-        print("Running bloodhound container ...")
-        cmd = [
-            self.config.backend,
-            "run",
-            "--rm",
-            "--replace",
-            "--detach",
-            "--net",
-            self.config.network,
-            "--network-alias",
-            "bloodhound",
-            "--name",
-            self.config.bloodhound_container,
-            "--publish",
-            f"127.0.0.1:{self.config.port}:8080",
-            "-e",
-            f"bhe_disable_cypher_qc={os.environ.get('bhe_disable_cypher_qc', 'false')}",
-            "-e",
-            f"bhe_database_connection=user={DB_USER} password={DB_PASSWORD} dbname={DB_NAME} host=app-db",
-            "-e",
-            f"bhe_neo4j_connection=neo4j://{NEO4J_AUTH}@graph-db:7687/",
-            "-e",
-            f"bhe_default_admin_principal_name={self.config.admin_name}",
-            "-e",
-            f"bhe_default_admin_password={self.config.admin_password}",
-            self.config.bloodhound_image,
-        ]
-        self._run_command(cmd)
+        self.bloodhound_manager.start()
         self._started_containers.append(self.config.bloodhound_container)
 
     def wait_for_neo4j(self):
         """Wait for Neo4j to be ready."""
-        print("Wait until neo4j is ready ...")
-        while True:
-            time.sleep(1)
-            try:
-                result = self._run_command(
-                    [
-                        self.config.backend,
-                        "logs",
-                        "--since",
-                        self.timestamp,
-                        self.config.neo4j_container,
-                    ],
-                    capture_output=True,
-                    check=False,
-                )
-                if result.returncode == 0:
-                    logs = result.stdout
-                    if "Remote interface available at http://localhost:7474/" in logs:
-                        break
-                    if "Error" in logs:
-                        print(logs)
-                        print(f"{Colors.RED}Neo4j container failed{Colors.NC}")
-                        self.cleanup()
-                        sys.exit(1)
-            except (subprocess.SubprocessError, FileNotFoundError) as e:
-                print(f"{Colors.RED}Failed to check Neo4j logs: {e}{Colors.NC}")
-                continue
+        self.neo4j_manager.wait_for_ready()
 
     def wait_for_bloodhound(self):
         """Wait for BloodHound to be ready."""
-        print("Wait until bloodhound is ready ...")
-        while True:
-            time.sleep(1)
-            try:
-                result = self._run_command(
-                    [
-                        self.config.backend,
-                        "logs",
-                        "--since",
-                        self.timestamp,
-                        self.config.bloodhound_container,
-                    ],
-                    capture_output=True,
-                    check=False,
-                )
-                if result.returncode == 0:
-                    logs = result.stdout
-                    if "Server started successfully" in logs:
-                        break
-                    if any(
-                        pattern in logs
-                        for pattern in ['"level":"error"', '"level":"fatal"', "Error: "]
-                    ):
-                        print(logs)
-                        print(f"{Colors.RED}BloodHound container failed{Colors.NC}")
-                        self.cleanup()
-                        sys.exit(1)
-            except (subprocess.SubprocessError, FileNotFoundError) as e:
-                print(f"{Colors.RED}Failed to check BloodHound logs: {e}{Colors.NC}")
-                continue
+        self.bloodhound_manager.wait_for_ready()
 
     def set_password_expiry(self):
         """Set the admin password to not expire for a year."""
-        expiry = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d 00:00:00+00")
-        cmd = [
-            self.config.backend,
-            "exec",
-            self.config.postgres_container,
-            "psql",
-            "-q",
-            "-U",
-            DB_USER,
-            "-d",
-            DB_NAME,
-            "-c",
-            f"UPDATE auth_secrets SET expires_at='{expiry}' WHERE id='1';",
-        ]
-        self._run_command(cmd)
+        self.postgres_manager.set_password_expiry()
 
     def _stop_containers(self):
         """Stop all containers."""
@@ -501,26 +607,7 @@ class BloodHoundCE:
 
     def attach_to_bloodhound(self):
         """Attach to BloodHound container for monitoring."""
-        try:
-            # Show logs first
-            result = self._run_command(
-                [
-                    self.config.backend,
-                    "logs",
-                    "--since",
-                    self.timestamp,
-                    self.config.bloodhound_container,
-                ],
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                print(result.stdout)
-
-            # Attach to container (this will block until interrupted)
-            subprocess.run([self.config.backend, "attach", self.config.bloodhound_container])
-        except KeyboardInterrupt:
-            pass
+        self.bloodhound_manager.attach_for_monitoring()
 
     def run(self):
         """Main execution flow."""
