@@ -55,86 +55,112 @@ NEO4J_AUTH = "neo4j/bloodhoundcommunityedition"
 @dataclass
 class Config:
     """Configuration for BloodHound CE deployment."""
+
     backend: str
     port: int
     bolt_port: Optional[int]
     workspace: str
     data_dir: Path
-    
+
     # Derived paths
     neo4j_vol: Path
     postgres_vol: Path
-    
+
     # Credentials
     admin_name: str
     admin_password: str
-    
+
     # Images
     bloodhound_image: str
     neo4j_image: str = NEO4J_IMAGE
     postgres_image: str = POSTGRES_IMAGE
-    
+
     # Container and network names
     network: str = NETWORK_NAME
     bloodhound_container: str = BLOODHOUND_CONTAINER
     neo4j_container: str = NEO4J_CONTAINER
     postgres_container: str = POSTGRES_CONTAINER
-    
+
     @staticmethod
     def _validate_port(port: int, port_name: str) -> None:
         """Validate port number is in valid range."""
         if not (1 <= port <= 65535):
-            print(f"{Colors.RED}Error: {port_name} ({port}) must be between 1 and 65535{Colors.NC}")
-            print(f"{Colors.RED}Suggestion: Use a port number like 8080, 8181, or 3000{Colors.NC}")
+            print(
+                f"{Colors.RED}Error: {port_name} ({port}) must be between 1 and 65535{Colors.NC}"
+            )
+            print(
+                f"{Colors.RED}Suggestion: Use a port number like 8080, 8181, or 3000{Colors.NC}"
+            )
             sys.exit(1)
         if port < 1024:
-            print(f"{Colors.RED}Warning: {port_name} ({port}) is a privileged port. You may need sudo{Colors.NC}")
-    
+            print(
+                f"{Colors.RED}Warning: {port_name} ({port}) is a privileged port. You may need sudo{Colors.NC}"
+            )
+
     @staticmethod
     def _validate_workspace(workspace: str) -> None:
         """Validate workspace name contains only safe characters."""
         import re
-        if not re.match(r'^[a-zA-Z0-9_-]+$', workspace):
-            print(f"{Colors.RED}Error: workspace '{workspace}' contains invalid characters{Colors.NC}")
-            print(f"{Colors.RED}Suggestion: Use only letters, numbers, underscores, and hyphens{Colors.NC}")
+
+        if not re.match(r"^[a-zA-Z0-9_-]+$", workspace):
+            print(
+                f"{Colors.RED}Error: workspace '{workspace}' contains invalid characters{Colors.NC}"
+            )
+            print(
+                f"{Colors.RED}Suggestion: Use only letters, numbers, underscores, and hyphens{Colors.NC}"
+            )
             sys.exit(1)
-    
+
     @staticmethod
     def _validate_data_directory(data_path: Path) -> None:
         """Validate data directory is accessible and writable."""
         try:
             # Check if parent exists and is writable
             if not data_path.parent.exists():
-                print(f"{Colors.RED}Error: Parent directory {data_path.parent} does not exist{Colors.NC}")
-                print(f"{Colors.RED}Suggestion: Create the parent directory first: mkdir -p {data_path.parent}{Colors.NC}")
+                print(
+                    f"{Colors.RED}Error: Parent directory {data_path.parent} does not exist{Colors.NC}"
+                )
+                print(
+                    f"{Colors.RED}Suggestion: Create the parent directory first: mkdir -p {data_path.parent}{Colors.NC}"
+                )
                 sys.exit(1)
-            
+
             if not os.access(data_path.parent, os.W_OK):
-                print(f"{Colors.RED}Error: No write permission for {data_path.parent}{Colors.NC}")
-                print(f"{Colors.RED}Suggestion: Check directory permissions or run with appropriate privileges{Colors.NC}")
+                print(
+                    f"{Colors.RED}Error: No write permission for {data_path.parent}{Colors.NC}"
+                )
+                print(
+                    f"{Colors.RED}Suggestion: Check directory permissions or run with appropriate privileges{Colors.NC}"
+                )
                 sys.exit(1)
-                
+
         except OSError as e:
             print(f"{Colors.RED}Error: Cannot access data directory: {e}{Colors.NC}")
-            print(f"{Colors.RED}Suggestion: Check the path exists and you have permission to access it{Colors.NC}")
+            print(
+                f"{Colors.RED}Suggestion: Check the path exists and you have permission to access it{Colors.NC}"
+            )
             sys.exit(1)
-    
+
     @staticmethod
     def _validate_disk_space(data_path: Path, min_gb: float = 2.0) -> None:
         """Validate sufficient disk space is available."""
         try:
             stat = shutil.disk_usage(data_path.parent)
-            free_gb = stat.free / (1024 ** 3)
-            
+            free_gb = stat.free / (1024**3)
+
             if free_gb < min_gb:
-                print(f"{Colors.RED}Error: Insufficient disk space. Need {min_gb:.1f}GB, have {free_gb:.1f}GB{Colors.NC}")
-                print(f"{Colors.RED}Suggestion: Free up disk space or use a different data directory{Colors.NC}")
+                print(
+                    f"{Colors.RED}Error: Insufficient disk space. Need {min_gb:.1f}GB, have {free_gb:.1f}GB{Colors.NC}"
+                )
+                print(
+                    f"{Colors.RED}Suggestion: Free up disk space or use a different data directory{Colors.NC}"
+                )
                 sys.exit(1)
-                
+
         except OSError as e:
             print(f"{Colors.RED}Warning: Cannot check disk space: {e}{Colors.NC}")
             # Continue anyway - disk space check is not critical
-    
+
     @classmethod
     def create(
         cls,
@@ -149,18 +175,22 @@ class Config:
         port = int(os.environ.get("PORT", port))
         workspace = os.environ.get("WORKSPACE", workspace)
         data_dir = os.environ.get("DATA_DIR", data_dir)
-        
+
         # Validate inputs
         cls._validate_port(port, "port")
         if bolt_port is not None:
             cls._validate_port(bolt_port, "bolt_port")
             if bolt_port == port:
-                print(f"{Colors.RED}Error: bolt_port ({bolt_port}) cannot be the same as port ({port}){Colors.NC}")
-                print(f"{Colors.RED}Suggestion: Use different port numbers or omit --bolt-port{Colors.NC}")
+                print(
+                    f"{Colors.RED}Error: bolt_port ({bolt_port}) cannot be the same as port ({port}){Colors.NC}"
+                )
+                print(
+                    f"{Colors.RED}Suggestion: Use different port numbers or omit --bolt-port{Colors.NC}"
+                )
                 sys.exit(1)
-        
+
         cls._validate_workspace(workspace)
-        
+
         # Determine data directory
         if data_dir:
             data_path = Path(data_dir).resolve()
@@ -169,19 +199,19 @@ class Config:
                 "XDG_DATA_HOME", os.path.expanduser("~/.local/share")
             )
             data_path = Path(xdg_data_home) / "dockerhound" / workspace
-        
+
         # Validate data directory access and disk space
         cls._validate_data_directory(data_path)
         cls._validate_disk_space(data_path)
-        
+
         # Get BloodHound image with tag
         bloodhound_tag = os.environ.get("BLOODHOUND_TAG", "latest")
         bloodhound_image = BLOODHOUND_IMAGE_TEMPLATE.format(bloodhound_tag)
-        
+
         # Get admin credentials
         admin_name = os.environ.get("ADMIN_NAME", DEFAULT_ADMIN_NAME)
         admin_password = os.environ.get("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
-        
+
         return cls(
             backend=backend,
             port=port,
@@ -198,44 +228,44 @@ class Config:
 
 class ContainerManager(ABC):
     """Base class for container management."""
-    
+
     def __init__(self, config: Config, run_command_fn: Callable):
         self.config = config
         self._run_command = run_command_fn
         self.timestamp = str(int(time.time()))
-    
+
     @abstractmethod
     def get_container_name(self) -> str:
         """Get the container name."""
         pass
-    
+
     @abstractmethod
     def get_run_command(self) -> List[str]:
         """Get the command to run the container."""
         pass
-    
+
     @abstractmethod
     def get_ready_log_pattern(self) -> str:
         """Get the log pattern that indicates the container is ready."""
         pass
-    
+
     @abstractmethod
     def get_error_log_patterns(self) -> List[str]:
         """Get the log patterns that indicate container failure."""
         pass
-    
+
     def start(self) -> None:
         """Start the container."""
         container_name = self.get_container_name()
         print(f"Running {container_name.lower()} container ...")
         cmd = self.get_run_command()
         self._run_command(cmd)
-    
+
     def wait_for_ready(self) -> None:
         """Wait for the container to be ready."""
         container_name = self.get_container_name()
         print(f"Wait until {container_name.lower()} is ready ...")
-        
+
         while True:
             time.sleep(1)
             try:
@@ -254,11 +284,13 @@ class ContainerManager(ABC):
                     logs = result.stdout
                     if self.get_ready_log_pattern() in logs:
                         break
-                    
+
                     error_patterns = self.get_error_log_patterns()
                     if any(pattern in logs for pattern in error_patterns):
                         print(logs)
-                        print(f"{Colors.RED}{container_name} container failed{Colors.NC}")
+                        print(
+                            f"{Colors.RED}{container_name} container failed{Colors.NC}"
+                        )
                         sys.exit(1)
             except Exception:
                 continue
@@ -266,50 +298,60 @@ class ContainerManager(ABC):
 
 class NetworkManager:
     """Manages container networks."""
-    
+
     def __init__(self, config: Config, run_command_fn: Callable):
         self.config = config
         self._run_command = run_command_fn
         self._created_network = False
-    
+
     def network_exists(self) -> bool:
         """Check if the network exists."""
         try:
             result = self._run_command(
-                [self.config.backend, "network", "exists", self.config.network], check=False
+                [self.config.backend, "network", "exists", self.config.network],
+                check=False,
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             print(f"{Colors.RED}Failed to check network existence: {e}{Colors.NC}")
             return False
-    
+
     def setup(self) -> None:
         """Create the container network if it doesn't exist."""
         if not self.network_exists():
             try:
-                self._run_command([self.config.backend, "network", "create", self.config.network])
+                self._run_command(
+                    [self.config.backend, "network", "create", self.config.network]
+                )
                 self._created_network = True
             except subprocess.CalledProcessError as e:
-                print(f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}")
+                print(
+                    f"{Colors.RED}Failed to create network '{self.config.network}'{Colors.NC}"
+                )
                 if "already exists" in str(e).lower():
-                    print(f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}")
+                    print(
+                        f"{Colors.RED}Suggestion: Network may exist but be inaccessible. Try: {self.config.backend} network rm {self.config.network}{Colors.NC}"
+                    )
                 raise
-    
+
     def cleanup(self) -> None:
         """Clean up the network if we created it."""
         if self._created_network:
             try:
-                self._run_command([self.config.backend, "network", "rm", self.config.network], check=False)
+                self._run_command(
+                    [self.config.backend, "network", "rm", self.config.network],
+                    check=False,
+                )
             except Exception:
                 pass
 
 
 class PostgresManager(ContainerManager):
     """Manages PostgreSQL container."""
-    
+
     def get_container_name(self) -> str:
         return self.config.postgres_container
-    
+
     def get_run_command(self) -> List[str]:
         return [
             self.config.backend,
@@ -335,13 +377,13 @@ class PostgresManager(ContainerManager):
             f"POSTGRES_DB={DB_NAME}",
             self.config.postgres_image,
         ]
-    
+
     def get_ready_log_pattern(self) -> str:
         return "database system is ready to accept connections"
-    
+
     def get_error_log_patterns(self) -> List[str]:
         return ["FATAL:", "ERROR:", "could not"]
-    
+
     def set_password_expiry(self) -> None:
         """Set the admin password to not expire for a year."""
         expiry = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d 00:00:00+00")
@@ -363,10 +405,10 @@ class PostgresManager(ContainerManager):
 
 class Neo4jManager(ContainerManager):
     """Manages Neo4j container."""
-    
+
     def get_container_name(self) -> str:
         return self.config.neo4j_container
-    
+
     def get_run_command(self) -> List[str]:
         cmd = [
             self.config.backend,
@@ -385,31 +427,33 @@ class Neo4jManager(ContainerManager):
             "--publish",
             "127.0.0.1:7474:7474",
         ]
-        
+
         # Only expose bolt port if explicitly requested
         if self.config.bolt_port is not None:
             cmd.extend(["--publish", f"127.0.0.1:{self.config.bolt_port}:7687"])
-        
-        cmd.extend([
-            "-e",
-            f"NEO4J_AUTH={NEO4J_AUTH}",
-            self.config.neo4j_image,
-        ])
+
+        cmd.extend(
+            [
+                "-e",
+                f"NEO4J_AUTH={NEO4J_AUTH}",
+                self.config.neo4j_image,
+            ]
+        )
         return cmd
-    
+
     def get_ready_log_pattern(self) -> str:
         return "Remote interface available at http://localhost:7474/"
-    
+
     def get_error_log_patterns(self) -> List[str]:
         return ["Error"]
 
 
 class BloodhoundManager(ContainerManager):
     """Manages BloodHound container."""
-    
+
     def get_container_name(self) -> str:
         return self.config.bloodhound_container
-    
+
     def get_run_command(self) -> List[str]:
         return [
             self.config.backend,
@@ -437,13 +481,13 @@ class BloodhoundManager(ContainerManager):
             f"bhe_default_admin_password={self.config.admin_password}",
             self.config.bloodhound_image,
         ]
-    
+
     def get_ready_log_pattern(self) -> str:
         return "Server started successfully"
-    
+
     def get_error_log_patterns(self) -> List[str]:
         return ['"level":"error"', '"level":"fatal"', "Error: "]
-    
+
     def attach_for_monitoring(self) -> None:
         """Attach to BloodHound container for monitoring."""
         try:
@@ -463,7 +507,9 @@ class BloodhoundManager(ContainerManager):
                 print(result.stdout)
 
             # Attach to container (this will block until interrupted)
-            subprocess.run([self.config.backend, "attach", self.config.bloodhound_container])
+            subprocess.run(
+                [self.config.backend, "attach", self.config.bloodhound_container]
+            )
         except KeyboardInterrupt:
             pass
 
@@ -472,7 +518,7 @@ class BloodHoundCE:
     def __init__(self, config: Config):
         self.config = config
         self._started_containers: List[str] = []
-        
+
         # Initialize managers
         self.network_manager = NetworkManager(config, self._run_command)
         self.postgres_manager = PostgresManager(config, self._run_command)
@@ -515,15 +561,21 @@ class BloodHoundCE:
             print(f"{Colors.RED}Command failed: {' '.join(cmd)}{Colors.NC}")
             if capture_output and e.stderr:
                 print(f"{Colors.RED}{e.stderr}{Colors.NC}")
-            
+
             # Provide helpful suggestions for common failures
             if "not found" in str(e).lower() or "no such" in str(e).lower():
-                print(f"{Colors.RED}Suggestion: Check if {cmd[0]} is installed and in PATH{Colors.NC}")
+                print(
+                    f"{Colors.RED}Suggestion: Check if {cmd[0]} is installed and in PATH{Colors.NC}"
+                )
             elif "permission denied" in str(e).lower():
-                print(f"{Colors.RED}Suggestion: Try running with appropriate privileges or check file permissions{Colors.NC}")
+                print(
+                    f"{Colors.RED}Suggestion: Try running with appropriate privileges or check file permissions{Colors.NC}"
+                )
             elif "port" in str(e).lower() and "already" in str(e).lower():
-                print(f"{Colors.RED}Suggestion: Use a different port with --port flag or stop the conflicting service{Colors.NC}")
-            
+                print(
+                    f"{Colors.RED}Suggestion: Use a different port with --port flag or stop the conflicting service{Colors.NC}"
+                )
+
             raise
 
     def _container_exists(self, name: str) -> bool:
@@ -549,7 +601,11 @@ class BloodHoundCE:
 
     def pull_images(self) -> None:
         """Pull all required container images."""
-        images = [self.config.bloodhound_image, self.config.neo4j_image, self.config.postgres_image]
+        images = [
+            self.config.bloodhound_image,
+            self.config.neo4j_image,
+            self.config.postgres_image,
+        ]
         for image in images:
             print(f"Pulling {image}...")
             self._run_command([self.config.backend, "pull", image])
@@ -584,12 +640,18 @@ class BloodHoundCE:
     def _stop_containers(self) -> None:
         """Stop all containers."""
         # Stop containers in reverse order of creation, including BloodHound
-        containers = [self.config.bloodhound_container, self.config.neo4j_container, self.config.postgres_container]
+        containers = [
+            self.config.bloodhound_container,
+            self.config.neo4j_container,
+            self.config.postgres_container,
+        ]
         for container in containers:
             if container in self._started_containers:
                 try:
                     print(f"Stopping container {container}...")
-                    self._run_command([self.config.backend, "stop", "-i", container], check=False)
+                    self._run_command(
+                        [self.config.backend, "stop", "-i", container], check=False
+                    )
                     self._started_containers.remove(container)
                 except (subprocess.SubprocessError, FileNotFoundError):
                     # Container may not exist or backend unavailable - continue cleanup
@@ -599,7 +661,9 @@ class BloodHoundCE:
         """Clean up the created network."""
         try:
             print(f"Removing network {self.config.network}...")
-            self._run_command([self.config.backend, "network", "rm", self.config.network], check=False)
+            self._run_command(
+                [self.config.backend, "network", "rm", self.config.network], check=False
+            )
             self._created_network = False
         except (subprocess.SubprocessError, FileNotFoundError):
             # Network may not exist or backend unavailable - continue cleanup
@@ -630,7 +694,9 @@ class BloodHoundCE:
             self.set_password_expiry()
 
             # Success message
-            print(f"{Colors.GREEN}Success! Go to http://localhost:{self.config.port}{Colors.NC}")
+            print(
+                f"{Colors.GREEN}Success! Go to http://localhost:{self.config.port}{Colors.NC}"
+            )
             print(
                 f"{Colors.GREEN}Login with {self.config.admin_name}/{self.config.admin_password}{Colors.NC}"
             )
@@ -639,7 +705,7 @@ class BloodHoundCE:
 
             # Attach to container for log monitoring
             self.attach_to_bloodhound()
-        
+
         except Exception as e:
             print(f"{Colors.RED}Setup failed: {e}{Colors.NC}")
             self.cleanup()
@@ -660,7 +726,9 @@ def detect_backend() -> str:
 
     print(f"{Colors.RED}Neither podman nor docker found.{Colors.NC}")
     print(f"{Colors.RED}Suggestion: Install one of the following:{Colors.NC}")
-    print(f"{Colors.RED}  - Podman: https://podman.io/getting-started/installation{Colors.NC}")
+    print(
+        f"{Colors.RED}  - Podman: https://podman.io/getting-started/installation{Colors.NC}"
+    )
     print(f"{Colors.RED}  - Docker: https://docs.docker.com/get-docker/{Colors.NC}")
     sys.exit(1)
 
