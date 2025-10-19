@@ -348,6 +348,7 @@ class NetworkManager:
                 self._run_command(
                     [self.config.backend, "network", "rm", self.config.network],
                     check=False,
+                    capture_output=True,
                 )
             except Exception:
                 pass
@@ -680,18 +681,6 @@ class BloodHoundCE:
                 except (subprocess.SubprocessError, FileNotFoundError):
                     # Container may not exist or backend unavailable - continue cleanup
                     pass
-
-    def _cleanup_network(self) -> None:
-        """Clean up the created network."""
-        try:
-            logger.info(f"Removing network {self.config.network}...")
-            self._run_command(
-                [self.config.backend, "network", "rm", self.config.network], check=False
-            )
-            self._created_network = False
-        except (subprocess.SubprocessError, FileNotFoundError):
-            # Network may not exist or backend unavailable - continue cleanup
-            pass
 
     def attach_to_bloodhound(self) -> None:
         """Attach to BloodHound container for monitoring."""
