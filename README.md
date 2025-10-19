@@ -11,17 +11,18 @@ a packaged Python project. The bash script has beend preserved in
 
 ## Why dockerhound?
 
-BloodHound CE typically requires setting up multiple services. dockerhound
-packages everything into containers with sensible defaults:
+BloodHound CE typically requires setting up multiple services.
+dockerhound packages everything into containers with sensible defaults:
 
 - Default credentials: `admin/admin` (no password change required)
 - Automatic database initialization
 - Isolated workspaces for different projects
 - Podman preferred, Docker supported
 
-If you have only podman and uv installed, you can run BloodHound instantly:
+If you have only podman and uv installed, you can run BloodHound
+instantly:
 
-```bash
+``` bash
 $ uv tool run dockerhound
 ...
 Running postgres container ...
@@ -38,7 +39,7 @@ Press CTRL-C when you're done.
 
 ## Installation
 
-```bash
+``` bash
 # Using uv (recommended):
 uv tool install dockerhound
 
@@ -48,7 +49,7 @@ pipx install dockerhound
 
 Or install from source:
 
-```bash
+``` bash
 git clone <repository>
 cd dockerhound
 # Using uv (recommended):
@@ -64,29 +65,31 @@ Requires either podman or docker installed. Podman is preferred.
 
 Start BloodHound CE:
 
-```bash
+``` bash
 dockerhound
 ```
 
 This will:
-1. Start PostgreSQL and Neo4j containers
-2. Wait for services to be ready
-3. Launch BloodHound CE on <http://localhost:8181>
-4. Set up admin credentials (admin/admin)
+
+1.  Start PostgreSQL and Neo4j containers
+2.  Wait for services to be ready
+3.  Launch BloodHound CE on <http://localhost:8181>
+4.  Set up admin credentials (admin/admin)
 
 ### Options
 
 - `--port` / `-p`: Change web interface port (default: 8181)
 - `--workspace` / `-w`: Use a specific workspace (default: "default")
 - `--backend`: Force container backend (`podman` or `docker`)
-- `--bolt-port`: Expose Neo4j bolt port (default: 7687, only exposed if specified)
+- `--bolt-port`: Expose Neo4j bolt port (default: 7687, only exposed if
+  specified)
 - `--data-dir`: Custom data directory path
 
 ### Commands
 
 Pull latest images:
 
-```bash
+``` bash
 dockerhound pull
 ```
 
@@ -98,7 +101,8 @@ dockerhound pull
 
 ## Workspaces
 
-Workspaces keep different BloodHound databases separate. Each workspace has its own:
+Workspaces keep different BloodHound databases separate. Each workspace
+has its own:
 
 - Neo4j graph database
 - PostgreSQL application database
@@ -106,7 +110,7 @@ Workspaces keep different BloodHound databases separate. Each workspace has its 
 
 Switch workspaces:
 
-```bash
+``` bash
 # Use client1 workspace
 dockerhound --workspace client1
 
@@ -116,7 +120,7 @@ WORKSPACE=client1 dockerhound
 
 ## Examples
 
-```bash
+``` bash
 # Default setup
 dockerhound
 
@@ -137,7 +141,7 @@ dockerhound --data-dir ./bloodhound-data
 
 Remove containers and data:
 
-```bash
+``` bash
 podman container rm --filter name='DockerHound-CE*'
 rm -rf ~/.local/share/dockerhound/
 ```
