@@ -1,8 +1,13 @@
 # dockerhound
 
-Run [BloodHound CE](https://github.com/SpecterOps/BloodHound) as a single-user
-application using containers. This tool manages the required PostgreSQL and
-Neo4j databases automatically, with no manual setup needed.
+Run [BloodHound CE](https://github.com/SpecterOps/BloodHound) as a
+single-user application using containers. This tool manages the required
+PostgreSQL and Neo4j databases automatically, with no manual setup
+needed.
+
+The project was first designed as a single bash script and evolved into
+a packaged Python project. The bash script has beend preserved in
+`bloodhound-ce` for those who prefer a simpler setup.
 
 ## Why dockerhound?
 
