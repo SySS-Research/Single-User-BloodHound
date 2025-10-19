@@ -201,6 +201,8 @@ class Config:
             )
             data_path = Path(xdg_data_home) / "dockerhound" / workspace
 
+        data_path.mkdir(parents=True, exist_ok=True)
+
         # Validate data directory access and disk space
         cls._validate_data_directory(data_path)
         cls._validate_disk_space(data_path)
