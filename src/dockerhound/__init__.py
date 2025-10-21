@@ -746,7 +746,7 @@ def detect_backend() -> str:
     sys.exit(1)
 
 
-@click.command()
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
     "--backend",
     type=click.Choice(["podman", "docker"]),
