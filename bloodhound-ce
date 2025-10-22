@@ -29,6 +29,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/BloodHound-CE/$WORKSPACE"
 NEO4J_VOL="$DATA_DIR/neo4j"
 POSTGRES_VOL="$DATA_DIR/postgres"
 NETWORK="BloodHound-CE-network"
+INSTALL_GDS="${INSTALL_GDS:-true}"
 
 BLOODHOUND_ADMIN_NAME="admin"
 BLOODHOUND_ADMIN_PASSWORD="admin"
@@ -88,6 +89,73 @@ function run_postgres() {
 			>/dev/null
 }
 
+function install_gds_plugin() {
+	if [ "$INSTALL_GDS" = "true" ]; then
+		local PLUGINS_DIR="$NEO4J_VOL/plugins"
+		local GDS_VERSION="2.6.7"
+		local GDS_JAR="neo4j-graph-data-science-${GDS_VERSION}.jar"
+		local GDS_URL="https://github.com/neo4j/graph-data-science/releases/download/${GDS_VERSION}/${GDS_JAR}"
+		local GDS_SHA256="ecdad4b1050f7727af1af76579344b792b4ea8e48102955bec0e99d7cb8a46e9"
+		
+		# Try to create plugins directory if it doesn't exist
+		# This works on first run before Neo4j takes ownership
+		if [ ! -d "$PLUGINS_DIR" ]; then
+			mkdir -p "$PLUGINS_DIR" 2>/dev/null || true
+		fi
+		
+		# Check if plugin already exists
+		if [ -f "$PLUGINS_DIR/$GDS_JAR" ]; then
+			echo "GDS plugin already installed."
+			return 0
+		fi
+		
+		# Try to download directly to plugins directory
+		# This works on first run before Neo4j takes ownership
+		if [ -w "$PLUGINS_DIR" ] || [ ! -e "$PLUGINS_DIR" ]; then
+			echo "Downloading Neo4j GDS plugin version ${GDS_VERSION}..."
+			local download_status
+			if command -v curl >/dev/null 2>&1; then
+				curl -fsSL -o "$PLUGINS_DIR/$GDS_JAR" "$GDS_URL"
+				download_status=$?
+			elif command -v wget >/dev/null 2>&1; then
+				wget -q -O "$PLUGINS_DIR/$GDS_JAR" "$GDS_URL"
+				download_status=$?
+			else
+				echo "Warning: Neither curl nor wget found. GDS plugin will not be installed."
+				return 1
+			fi
+			
+			if [ $download_status -eq 0 ]; then
+				# Verify checksum
+				if command -v sha256sum >/dev/null 2>&1; then
+					local computed_hash=$(sha256sum "$PLUGINS_DIR/$GDS_JAR" | cut -d' ' -f1)
+					if [ "$computed_hash" = "$GDS_SHA256" ]; then
+						echo "GDS plugin downloaded and verified successfully."
+					else
+						echo "Warning: Checksum verification failed. Removing downloaded file."
+						rm -f "$PLUGINS_DIR/$GDS_JAR" 2>/dev/null
+						return 1
+					fi
+				else
+					echo "Warning: sha256sum not found. Skipping checksum verification."
+					echo "GDS plugin downloaded successfully (without verification)."
+				fi
+			else
+				echo "Warning: Failed to download GDS plugin. Some features may not work."
+				rm -f "$PLUGINS_DIR/$GDS_JAR" 2>/dev/null
+				return 1
+			fi
+		else
+			# Directory not writable (Neo4j has taken ownership)
+			# Plugin should have been installed on first run
+			echo "Warning: Cannot write to plugins directory. GDS plugin should have been installed on first run."
+			echo "If Neo4j was run without the GDS plugin, please delete the workspace and start fresh:"
+			echo "  rm -rf '$DATA_DIR'"
+			return 1
+		fi
+	fi
+}
+
 function run_neo4j() {
 	echo Running neo4j container ... &&
 		podman run \
@@ -101,6 +169,7 @@ function run_neo4j() {
 			--publish 127.0.0.1:7474:7474 \
 			--publish 127.0.0.1:7687:7687 \
 			-e "NEO4J_AUTH=neo4j/bloodhoundcommunityedition" \
+			-e "NEO4J_PLUGINS=[\"graph-data-science\"]" \
 			"$NEO4J_IMAGE" \
 			>/dev/null
 }
@@ -125,6 +194,7 @@ function run_bloodhound() {
 }
 
 run_postgres
+install_gds_plugin
 run_neo4j
 
 # Not waiting for postgres because it's faster than neo4j anyway.

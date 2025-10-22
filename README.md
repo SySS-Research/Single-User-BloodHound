@@ -48,6 +48,15 @@ $ DATA_DIR=BH_DATA bloodhound-ce
 Then the data will be stored in `BH_DATA` in the current working directory.
 The port to listen on can similarly be changed by setting `$PORT`.
 
+## Neo4j GDS Plugin
+
+By default, the script installs the Neo4j Graph Data Science (GDS) plugin,
+which is required for certain BloodHound features. If you want to disable this:
+
+```console
+$ INSTALL_GDS=false bloodhound-ce
+```
+
 To update the images:
 
 ```console
