@@ -238,6 +238,9 @@ class ContainerManager(ABC):
         self._run_command = run_command_fn
         self.timestamp = str(int(time.time()))
 
+        self.uid = os.getuid()
+        self.gid = os.getgid()
+
     @abstractmethod
     def get_container_name(self) -> str:
         """Get the container name."""
@@ -369,12 +372,13 @@ class PostgresManager(ContainerManager):
             "--detach",
             "--net",
             self.config.network,
+            f"--userns=keep-id:uid={self.uid},gid={self.gid}",
             "--network-alias",
             "app-db",
             "--name",
             self.config.postgres_container,
             "--volume",
-            f"{self.config.postgres_vol}:/var/lib/postgresql/data",
+            f"{self.config.postgres_vol}:/var/lib/postgresql/data:U,Z",
             "-e",
             f"PGUSER={DB_USER}",
             "-e",
@@ -424,6 +428,7 @@ class Neo4jManager(ContainerManager):
             "--rm",
             "--detach",
             "--replace",
+            f"--userns=keep-id:uid={self.uid},gid={self.gid}",
             "--net",
             self.config.network,
             "--network-alias",
@@ -431,7 +436,7 @@ class Neo4jManager(ContainerManager):
             "--name",
             self.config.neo4j_container,
             "--volume",
-            f"{self.config.neo4j_vol}:/data",
+            f"{self.config.neo4j_vol}:/data:U,Z",
             "--publish",
             "127.0.0.1:7474:7474",
         ]
