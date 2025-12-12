@@ -41,7 +41,7 @@ Press CTRL-C when you're done.
 
 ``` bash
 # Using uv (recommended):
-uv tool install dockerhound
+uv tool install git+https://github.com/SySS-Research/Single-User-BloodHound
 
 # Using pipx:
 pipx install dockerhound
